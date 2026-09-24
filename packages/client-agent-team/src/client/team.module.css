@@ -1,6 +1,23 @@
+/* The shell's footer band is a nowrap flex row, so two full-width registrants
+   share one line: the other plugin's stack is squeezed to its minimum and the
+   band overflows the sidebar. Wrapping seats each full-width action on its own
+   row; our registration's order (100) puts this one below the others, directly
+   above Settings. Scoped to the band by its class name, like the other shell
+   selectors in this package. */
+:global(div[class*='footerActions']) {
+  flex-wrap: wrap;
+}
+
 .footerStack {
   display: flex;
-  flex: none;
+  /* The band is a flex row that every registrant shares, and another plugin
+     may register its own full-width stack into it. A non-shrinking 100% stack
+     claims the whole row, so that co-registrant is squeezed to its minimum and
+     the row overflows past the sidebar edge. Shrinking keeps this row the full
+     width when it is the only registrant while yielding the width a neighbour
+     needs; `min-width: 0` lets the label clip instead of forcing an overflow. */
+  flex: 1 1 auto;
+  min-width: 0;
   height: 42px;
   margin: 8px 0 0;
   width: 100%;
