@@ -14,6 +14,10 @@ Service 使用 `ctx.storageDomain`、`ctx.workspaceRegistry`、`ctx.agents`、`c
 
 有一类记录存的是「进度」，而不是它当场报告的那份投影。`team/thread-read` receipt 只携带 Workspace、Member、Thread ref、可选 Task ref、read watermark 与 Inbox delta；Thread、其 facts、anchor、读者的 Attention 与读完后剩余的未读计数，都在每次重放时从 projection 重新派生，因此重放一条读不再需要克隆一份假设投影、也不再重新数未读。这个形态之前写入的记录会把整份画面连同 delta 一起冻结：同一个 strict union 同时接受两形，旧记录以自身完整派生作为 expected 值，加载时就地 normalize 与校验，绝不改写任何已存储字节。两形都不符的记录——receipt 里多带画面字段、旧记录缺了所属 Task 或缺了一条 fact——会让整个 domain 打不开，而不是被猜测。对一次已提交读的相同重试返回原 receipt，画面取自当前 projection，从不返回冻结的旧画面。
 
+## 由 producer 触发的唤醒
+
+`wakeMember(request)` 代表 Host 插件（而不是 Human）在一个指名 Member 自己的 Session 里发起一个 turn：按计划触发的 routine、watcher、或另一个插件。它是唤醒，不是新 agent——Member 保留自己的 Session、私有记忆、Claim 和 Thread Attention——走的是与 DM relay 相同的投递通道：idle 的 Member 得到一次普通 turn，busy 的 Member 被 steer 进当前 turn。指令以 producer 自己的 source `kind` 作为 `notice` 注入，其一行摘要由 Harness 的上限收束；账本不追加任何记录：被触发的指令是 Member 读到的上下文，而不是其他 Member 引用的 Team fact。未能落地的唤醒抛出 `AgentTeamWakeDeliveryError`，其 `reason` 为 `unknown-member`、`member-not-enabled`、`no-live-session` 或 `wake-failed`——无人值守的 producer 日志必须能区分配错的目标与尚未激活的 Member。目标从持久 roster 解析：精确 Member id，或 handle（大小写不敏感，前导 `@` 可有可无）。
+
 ## 持久化与生命周期
 
 `storage-domain` 在持久读取处校验每条 record，并拒绝被其他版本标记的 backend unit。Team 只在 `KvTable.put()` 完成后更新 projection。其 Fiber 持有 Domain handle；dispose 通过 Cordis 移除拒绝新的 Service 调用，排空已接受的 Domain write，并在名称可重新打开前关闭 backend unit。

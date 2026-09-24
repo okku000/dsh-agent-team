@@ -37,6 +37,7 @@ import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
 import { boundaryByRef, carriedInputOf, checkpointByRef, checkpointRefFor, createTeamContextProjectionConfig, createTeamContextProjectionDefinition, foldTeamContextProjection, retainedTopicsThrough, TeamContextProjectionHost } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor, type AgentTeamDurableMemberResult } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime } from './member-runtime.ts'
+import { AgentTeamWakeDeliveryError, deliverWake, resolveWakeMember, type AgentTeamWakeRequest, type AgentTeamWakeResult } from './member-wake.ts'
 import type { MemberSkillSelectionRef } from './member-skills.ts'
 import { classifyRecoverableError, RecoveryCoordinator, RECOVERY_MAX_CONSECUTIVE_ERRORS } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf } from './stored-session-reader.ts'
@@ -147,6 +148,7 @@ export { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIAL
 export { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_NAMESPACE, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName } from './human-profile.ts'
 export { humanAvatarsRoot } from './human-avatar.ts'
 export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
+export { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeRefusalReason, type AgentTeamWakeRequest, type AgentTeamWakeResult } from './member-wake.ts'
 
 /** Process-stable marker carried by the final Team message tool definition. */
 export const AGENT_TEAM_PRESET_MARKER = Symbol.for('@wowyuarm/dsh-agent-team.preset')
@@ -1688,6 +1690,37 @@ export default class AgentTeam extends TypertRemoteService {
     const header = `Direct message from @${sender?.handle ?? 'a Team Member'} at ${formatTeamTimestamp(occurredAt)}:`
     const context = prior === undefined ? '' : `\n\n[most recent prior DM between you: ${prior}]`
     return `${header}\nWorkspace: ${workspaceId}\n\n${body}${context}`
+  }
+
+  /**
+   * Wake one Member's own Session with a producer's instruction.
+   *
+   * The Host-side entry point for anything that has to start a Member turn
+   * without a Human message: a routine firing on a schedule, a watcher, another
+   * plugin. This is a wake, not a new agent — the Member keeps its Session, its
+   * private memory, its Claims and its Thread Attention — and the delivery lane
+   * is the one DM relay and subagent continuations already use: an idle Member
+   * gets one ordinary turn, a busy Member is steered into its current turn.
+   *
+   * Nothing is committed to the ledger here. Deleting a routine does not delete
+   * the turns it fired, and a fired instruction is context the Member reads, not
+   * a Team fact other Members cite.
+   *
+   * @param request - the target (exact id, or a display handle), the producer's
+   * instruction and its one-line account of why it arrived.
+   * @returns what the wake did, including the lane it took.
+   * @throws AgentTeamWakeDeliveryError when the wake did not land; its `reason`
+   * distinguishes a typo in a producer's configuration from an intentional
+   * Member state and from a failed Session injection.
+   */
+  wakeMember(request: AgentTeamWakeRequest): AgentTeamWakeResult {
+    this.requireAccepting()
+    const member = resolveWakeMember(this.requireLedger().listMembers(), request)
+    const handle = this.handles.get(member.memberId)
+    if (handle === undefined) {
+      throw new AgentTeamWakeDeliveryError('no-live-session', member.memberId, member.handle, `Agent Member '${member.handle}' has no live session in this Host; it can be woken once it is activated`)
+    }
+    return deliverWake(member, handle, request)
   }
 
   threadHistoryForAgent(agent: Agent, request: AgentTeamThreadHistoryRequest): AgentTeamThreadHistory {
