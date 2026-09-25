@@ -25,11 +25,15 @@ Host 插件也可以在没有任何 Human、也没有 peer 发送者的情况下
 
 未能落地的唤醒会报告原因——`unknown-member`、`member-not-enabled`、`no-live-session`、`wake-failed`——无人值守的 producer 必须能区分配错的目标与尚未激活的 Member。
 
-Team 自己附带一个 producer，即 `wowyuarm-agent-team-routines` 行：`config.routines` 列出要触发什么、唤醒谁，用 handle 或带品牌的 id 指名 Member，每条 entry 声明且只声明一个 trigger——至少 60 的 `everySeconds`（给了 `anchorAt` 就按其对齐），或一个带明确 offset 的 RFC 3339 `at` 时刻。
+Team 自己附带一个 producer，即 `wowyuarm-agent-team-routines` 行：`config.routines` 列出要触发什么，每条 entry 声明且只声明一个 trigger——至少 60 的 `everySeconds`（给了 `anchorAt` 就按其对齐），或一个带明确 offset 的 RFC 3339 `at` 时刻。
+
+每条 entry 还用 `kind` 选择且只选择一个 action。wake 是默认值：用 handle 或带品牌的 id 指名 Member，并把指令注入该 Member 自己的 Session。`kind: 'post'` 的 entry 则给出带品牌的 `workspace:<uuid>` 与 `channel:<uuid>`，以及要投递的 `body` 和 body 必须携带的 `mentions`。
+
+post 以 Human 身份提交进一个新 Thread。凡是 body 里还没写到的 handle，都会在正文前渲染成 `@handle`——因为 mention 才是创建收件人 Inbox 条目、并让该 Member 起 turn 的东西，仅凭 Channel 成员身份不会通知任何人。`asTask: true` 改为带 Task 开这个 Thread。
 
 无法运行的声明会在该行挂载时报错，因为「静默地永不触发」正是无人值守的 producer 事后无法报告的失败；唯一例外是 Host 停机期间已错过的 one-shot，它记为 `not-armed`，而不是让启动失败。
 
-每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`——投递记通道与 Session id，被拒记唤醒的 reason，错过的时刻记 `not-armed`——尽力而为：日志不可写时只 warn 而不抛出，超过 256 KiB 后只保留最新 200 行。指令以 `[ROUTINE FIRE] <name>` 为标题，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。
+每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`——投递记通道与 Session id，post 记落地的 Channel 及其提交的 Thread 与 Message，被拒记唤醒的 reason（Host 拒绝 post 时记 `post-failed`），错过的时刻记 `not-armed`——尽力而为：日志不可写时只 warn 而不抛出，超过 256 KiB 后只保留最新 200 行。指令以 `[ROUTINE FIRE] <name>` 为标题，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。
 
 ## 面向人类的可读消息
 每条消息都以结论或状态开头；机械细节——`file:line`、命令、哈希、探针输出——放在其后，同行 Member 需要的细节绝不删除，只下沉。叙述使用 Human 所用的语言，标识符、路径、命令与 ref 保持原文。
