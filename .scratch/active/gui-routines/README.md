@@ -1,6 +1,6 @@
 # Routines created from the Team GUI
 
-Status: in progress — the store, the wake-only engine, the Host API, and the agent tool are landed; the global surface remains.
+Status: in progress — the store, the wake-only engine, the Host API, the agent tool, and the global surface are landed; a fire's outcome on that surface remains.
 Last checked: 2026-09-25.
 
 ## Redirect: wake only
@@ -15,12 +15,15 @@ is what a reversal would revert.
 ## Current frontier
 
 The engine is wake-only, the store (`eefbf4f`) makes a GUI-written routine take effect without a profile edit or a
-Host restart, and `02` landed the Host routine API plus the model-facing `team_routine` tool.
+Host restart, `02` landed the Host routine API plus the model-facing `team_routine` tool, and `03` landed the global
+surface: a Human can now see, create, edit, and delete every routine beside the Inbox, and an entry the operator
+declared in the profile is listed and marked rather than offered for edit.
 
-Nothing can *write* the store from the Client yet: the global surface is the last slice, and it is what makes the
-Human's stated payoff — scheduling something by saying it to an agent — visible and editable end to end.
+That closes the Human's stated payoff — scheduling something by saying it to an agent is visible and editable end to
+end — except for one thing: the surface shows the schedule, not what a fire did. A delivered or refused fire is a
+line in the Host's fire log and nothing reads it, so `04` is the remaining slice.
 
-Blocked: nothing. `03` is the frontier.
+Blocked: nothing. `04` is the frontier.
 
 ## Completion conditions
 
@@ -37,15 +40,21 @@ Blocked: nothing. `03` is the frontier.
 
 ## Formal-doc exit
 
-Not yet. The store and the wake-only routine contract are described in the package README pair ("Routines") and in
-`docs/team-collaboration/attention-and-messaging.md`, and the agent-facing tool has its row in the Team tool set
-documentation. The global surface needs its sentence and its creation copy once it ships.
+Partly done. The store and the wake-only routine contract are described in the package README pair ("Routines") and
+in `docs/team-collaboration/attention-and-messaging.md`; the agent-facing tool has its row in the Team tool set
+documentation; and the global surface now has its sentence and its creation copy in the client package README pair
+and in `frontend-design/sidebar-browser.md`, with `CHANGELOG.md` naming the entry.
+
+One fire-outcome sentence is deliberately written as a boundary rather than as shipped behaviour, because that is
+what the code does: the page lists the schedule, and the outcome stays in the Host's fire log. `04` replaces that
+sentence with the real contract once the read exists.
 
 ## Slices
 
 - `issues/01-engine-actions.md` — complete through `7eda414`, then narrowed by the wake-only redirect; its post
   criteria are historical.
 - `issues/02-host-api-and-agent-tool.md` — complete: the Host routine API plus `team_routine`.
-- `issues/03-global-routines-surface.md` — the frontier.
+- `issues/03-global-routines-surface.md` — complete: the global surface that lists, creates, edits, and deletes.
+- `issues/04-fire-outcome-on-the-surface.md` — the frontier: a fire's outcome on that surface.
 
 Confirmed scope, the resolved UI placement, and the authority note about agent-created routines: [spec.md](spec.md).

@@ -115,31 +115,62 @@ exports[`Team conversation surfaces > restores persisted Team mode, reconciles a
               aria-label="工作区"
               class="workspaceBrowser"
             >
-              <button
-                aria-label="收件箱"
-                class="inboxCard"
-                type="button"
+              <div
+                class="globalDestinations"
               >
-                <span
-                  class="inboxMark"
+                <button
+                  aria-label="收件箱"
+                  class="globalCard"
+                  data-team-inbox-card="true"
+                  type="button"
                 >
-                  <svg
-                    aria-hidden="true"
-                    data-content="be386ae5"
-                    fill="none"
-                    height="16"
-                    stroke-width="1"
-                    viewBox="0 0 16 16"
-                    width="16"
-                    xmlns="http://www.w3.org/2000/svg"
-                  />
-                </span>
-                <span
-                  class="inboxCardLabel"
+                  <span
+                    class="inboxMark"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      data-content="be386ae5"
+                      fill="none"
+                      height="16"
+                      stroke-width="1"
+                      viewBox="0 0 16 16"
+                      width="16"
+                      xmlns="http://www.w3.org/2000/svg"
+                    />
+                  </span>
+                  <span
+                    class="globalCardLabel"
+                  >
+                    收件箱
+                  </span>
+                </button>
+                <button
+                  aria-label="定时任务"
+                  class="globalCard"
+                  data-team-routines-card="true"
+                  type="button"
                 >
-                  收件箱
-                </span>
-              </button>
+                  <span
+                    class="inboxMark"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      data-content="49d87a11"
+                      fill="none"
+                      height="16"
+                      stroke-width="1"
+                      viewBox="0 0 17 17"
+                      width="16"
+                      xmlns="http://www.w3.org/2000/svg"
+                    />
+                  </span>
+                  <span
+                    class="globalCardLabel"
+                  >
+                    定时任务
+                  </span>
+                </button>
+              </div>
               <span
                 class="root"
               >

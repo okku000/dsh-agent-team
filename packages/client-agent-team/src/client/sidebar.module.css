@@ -115,13 +115,15 @@
   margin: 8px;
 }
 
-/* The Human mention-Inbox entry: a card above the Workspace selector on the wide
-   rail, a queue icon on the narrow rail. Both mark unread the same way — a
-   dot on the icon's corner rather than a number beside it. The quantity is not
-   gone, it moved into the control's own name: what a reader scans the sidebar
-   for is whether anything waits, and the count answers a question asked on
-   purpose. */
-.inboxCard {
+/* The two global destinations — the Human mention-Inbox and the routine page —
+   are cards above the Workspace selector on the wide rail and icon buttons on the
+   narrow one. Both cross Workspaces rather than belonging to the scope that
+   selector names, which is why they stand outside it and share one chrome. The
+   Inbox marks unread the same way in either width — a dot on the icon's corner
+   rather than a number beside it. The quantity is not gone, it moved into the
+   control's own name: what a reader scans the sidebar for is whether anything
+   waits, and the count answers a question asked on purpose. */
+.globalCard {
   align-items: center;
   background: transparent;
   border: 0;
@@ -132,26 +134,37 @@
   flex: 0 0 auto;
   gap: 6px;
   height: 34px;
-  margin: 4px 0 2px;
+  /* Two global cards stack, so the gap between them is the list's own rhythm and
+     only the pair's outer edges keep the selector's margin. */
+  margin: 0;
   padding: 0 8px;
   text-align: left;
   width: 100%;
 }
-.inboxCard:hover,
-.inboxCard:focus-visible,
-.inboxCard[aria-current='page'] {
+.globalCard:hover,
+.globalCard:focus-visible,
+.globalCard[aria-current='page'] {
   /* The mark on the card cuts itself out of the card, not out of the page. */
   --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
   background: var(--dsw-alias-interactive-bg-hover);
 }
-.inboxCard:focus-visible {
+.globalCard:focus-visible {
   outline: 2px solid var(--dsw-alias-label-primary);
   outline-offset: -2px;
 }
-.inboxCard .inboxMark {
+/* The pair's own seat above the selector: one outer margin for the group, and the
+   cards inside it separated by the list rhythm rather than each carrying half a
+   margin. */
+.globalDestinations {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 2px;
+}
+.globalCard .inboxMark {
   color: var(--dsw-alias-label-tertiary);
 }
-.inboxCardLabel {
+.globalCardLabel {
   font-size: 14px;
   line-height: 20px;
   min-width: 0;

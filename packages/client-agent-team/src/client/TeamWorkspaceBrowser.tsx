@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { IconAgentPresetOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconAgentPresetOutlineRegular, IconAlarmClockOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamAddMemberRequest } from '@wowyuarm/dsh-agent-team/types'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamWorkspaceSelector } from './TeamWorkspaceSelector.tsx'
@@ -24,7 +24,7 @@ function InboxMark({ unread }: { readonly unread: number }) {
   </span>
 }
 
-export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectChannel, selectInbox, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadChannels, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, joinChannel, removeChannelMember, loadModels, openMemberSession }: TeamSidebarProps) {
+export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectChannel, selectInbox, selectRoutines, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadChannels, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, joinChannel, removeChannelMember, loadModels, openMemberSession }: TeamSidebarProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
   const workspaces = useWorkspaces(state => state.items)
   const selected = navigationState.workspaceId
@@ -38,8 +38,11 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   // embedded Member Session covers that page: the Inbox stays the remembered
   // face underneath — closing the overlay returns to it, marker included —
   // but the card is not a second current page while an Agent holds the seat.
-  const overviewIsCurrent = navigationState.channelRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true
+  const overviewIsCurrent = navigationState.channelRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true && navigationState.routines !== true
   const inboxIsCurrent = navigationState.inbox === true && navigationState.memberSessionId === undefined
+  // The routine page is the Inbox's sibling global face, so its row takes the
+  // marker on the same terms: while that page stands and no Member Session covers it.
+  const routinesIsCurrent = navigationState.routines === true && navigationState.memberSessionId === undefined
   const [creatingAgents, setCreatingAgents] = useState<readonly AgentTeamAddMemberRequest[]>([])
   // Rail icons request expansion and name the section to reveal once wide.
   const [pendingSection, setPendingSection] = useState<SidebarSection>()
@@ -84,13 +87,14 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   }, [loadInbox, subscribeChanges, subscribeReads, workspaces])
 
   useEffect(() => {
-    // The Inbox page is global and needs no selected Workspace, so the
-    // auto-select must not yank the seat back to a Workspace overview.
-    if (navigationState.inbox === true) return
+    // The Inbox and the routine page are the two global faces: both need no
+    // selected Workspace, so the auto-select must not yank either seat back to a
+    // Workspace overview.
+    if (navigationState.inbox === true || navigationState.routines === true) return
     if (navigationState.mode === 'team' && selectedId !== undefined && selectedId !== selected) {
       selectWorkspace(selectedId)
     }
-  }, [navigationState.inbox, navigationState.mode, selected, selectedId, selectWorkspace])
+  }, [navigationState.inbox, navigationState.routines, navigationState.mode, selected, selectedId, selectWorkspace])
 
   useEffect(() => {
     if (!wide || pendingSection === undefined) return
@@ -104,6 +108,11 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
       <Tooltip label={inboxLabel} side="right">
         <button type="button" className={css.railButton} aria-label={inboxLabel} aria-current={inboxIsCurrent ? 'page' : undefined} onClick={() => { selectInbox(); expandSidebar() }}>
           <InboxMark unread={inboxTotal} />
+        </button>
+      </Tooltip>
+      <Tooltip label={t('routinesTitle')} side="right">
+        <button type="button" className={css.railButton} aria-label={t('routinesTitle')} aria-current={routinesIsCurrent ? 'page' : undefined} onClick={() => { selectRoutines(); expandSidebar() }}>
+          <IconAlarmClockOutlineRegular size={16} />
         </button>
       </Tooltip>
       <Tooltip label={t('channels')} side="right">
@@ -120,13 +129,22 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   }
 
   return <section className={css.workspaceBrowser} aria-label={t('workspaces')}>
-    {/* The Inbox is the one destination that crosses Workspaces — its total sums
-        every one of them — so it stands above the selector rather than inside
-        the scope that selector names. */}
-    <button type="button" className={css.inboxCard} aria-label={inboxLabel} aria-current={inboxIsCurrent ? 'page' : undefined} onClick={selectInbox}>
-      <InboxMark unread={inboxTotal} />
-      <span className={css.inboxCardLabel}>{t('inboxTitle')}</span>
-    </button>
+    {/* The Inbox and the routine page are the destinations that cross
+        Workspaces — the Inbox's total sums every one of them, and a routine
+        belongs to the Host rather than to any of them — so the pair stands above
+        the selector instead of inside the scope that selector names. They share
+        one card chrome, so each still carries the marker a selector can tell it
+        apart by rather than both answering to the shared class. */}
+    <div className={css.globalDestinations}>
+      <button type="button" data-team-inbox-card className={css.globalCard} aria-label={inboxLabel} aria-current={inboxIsCurrent ? 'page' : undefined} onClick={selectInbox}>
+        <InboxMark unread={inboxTotal} />
+        <span className={css.globalCardLabel}>{t('inboxTitle')}</span>
+      </button>
+      <button type="button" data-team-routines-card className={css.globalCard} aria-label={t('routinesTitle')} aria-current={routinesIsCurrent ? 'page' : undefined} onClick={selectRoutines}>
+        <span className={css.inboxMark}><IconAlarmClockOutlineRegular size={16} /></span>
+        <span className={css.globalCardLabel}>{t('routinesTitle')}</span>
+      </button>
+    </div>
     <TeamWorkspaceSelector workspaces={workspaces} selectedId={selectedId} current={overviewIsCurrent} onSelect={selectWorkspace} t={t} />
     {selectedId !== undefined && <div className={css.workspaceSection}>
       <div ref={channelsRef}>

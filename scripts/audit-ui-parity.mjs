@@ -312,7 +312,7 @@ const GEOMETRY = [
   ['sidebar.module.css', '.channelRow', [['border-radius', '12px']], 'list row radius is 12px; the shipped rail put .panelRow on its .newSession bar\'s 12px in the 0.1.6 line (harness c6b81a75, 2026-09-15), which our 0.1.5-anchored docs only met at the 0.1.7 upgrade'],
   ['sidebar.module.css', '.agentRow', [['border-radius', '12px']], 'list row radius is 12px, the same tier as .channelRow above'],
   ['sidebar.module.css', '.workspaceTrigger', [['border-radius', '12px'], ['min-height', '34px'], ['border', '1px solid var(--dsw-alias-border-l2)']], 'the Workspace selector keeps the sidebar row geometry: 12px radius, 34px line, and its neutral separator written as 1px because that is what shipped\'s 0.5px declaration actually renders as'],
-  ['sidebar.module.css', '.inboxCard', [['border-radius', '12px'], ['height', '34px']], 'the Inbox entry is a sidebar row: 12px radius, 34px height'],
+  ['sidebar.module.css', '.globalCard', [['border-radius', '12px'], ['height', '34px']], 'both global destinations — the Inbox entry and the routine entry — are sidebar rows: 12px radius, 34px height'],
   ['member-row.module.css', '.row', [['border-radius', '12px']], 'the shared roster row is a list row wherever it renders: 12px, the rail/settings row tier'],
   ['composer.module.css', '.mentionMenu', [['border-radius', '16px']], 'the mention popover is the shipped menu surface: 16px, so it matches the Menu primitive this app already renders elsewhere'],
   ['composer.module.css', '.mentionOption', [['border-radius', '8px']], 'a row inside a menu surface carries the shipped .item radius of 8px'],

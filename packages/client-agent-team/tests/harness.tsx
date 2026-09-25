@@ -50,9 +50,13 @@ interface SeededMessage {
   readonly mentions?: readonly string[]
 }
 
-export async function runtimeWithTeam(options?: { mode?: 'team'; workspaceId?: string; initialChannels?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string }) {
+export async function runtimeWithTeam(options?: { mode?: 'team'; workspaceId?: string; routines?: boolean; initialChannels?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string }) {
   if (options?.mode !== undefined) {
-    localStorage.setItem('dsh.agent-team.navigation', JSON.stringify({ mode: options.mode, ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }))
+    localStorage.setItem('dsh.agent-team.navigation', JSON.stringify({
+      mode: options.mode,
+      ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }),
+      ...(options.routines === true ? { routines: true } : {}),
+    }))
   }
   const runtime = await SlotTestRuntime.create()
   const locale = new LocaleRuntime(runtime.ctx)
@@ -376,6 +380,49 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; workspaceId?: s
     inboxRows = rows.map(row => ({ workspaceId: row.workspaceId, item: row as Record<string, unknown> }))
     wakeAll()
   }
+  // The routine doubles. A routine belongs to the Host rather than to a
+  // Workspace, so `workspaceId` is a fence the Host checks and not a scope: the
+  // read answers the whole schedule however many Workspaces are visible, which
+  // is why a spec can seed one row and see it from every Workspace.
+  let routineRows: Array<Record<string, unknown>> = []
+  let routineReadFailure: string | undefined
+  let routineSaveFailure: string | undefined
+  let routineDeleteFailure: string | undefined
+  const routines = vi.fn(async (_request: { workspaceId: string }) => routineReadFailure === undefined
+    ? { ok: true as const, value: { routines: routineRows } }
+    : { ok: false as const, error: { message: routineReadFailure } })
+  // The name is the identity, so a save is an upsert: the double replaces an
+  // entry the store already held rather than appending a second one.
+  const saveRoutine = vi.fn(async (request: { workspaceId: string; routine: { readonly name: string } & Record<string, unknown> }) => {
+    if (routineSaveFailure !== undefined) return { ok: false as const, error: { message: routineSaveFailure } }
+    const existing = routineRows.find(row => row.name === request.routine.name) !== undefined
+    const routine = {
+      name: request.routine.name,
+      origin: 'store' as const,
+      declaration: request.routine,
+      ...(existing
+        ? { updatedBy: { kind: 'human' as const, memberId: 'member:human', handle: 'human' }, updatedAt: '2026-09-25T05:00:00.000Z' }
+        : { createdBy: { kind: 'human' as const, memberId: 'member:human', handle: 'human' }, createdAt: '2026-09-25T05:00:00.000Z' }),
+    }
+    routineRows = existing
+      ? routineRows.map(row => row.name === routine.name ? routine : row)
+      : [...routineRows, routine]
+    return { ok: true as const, value: { routine, created: !existing } }
+  })
+  const deleteRoutine = vi.fn(async (request: { workspaceId: string; name: string }) => {
+    if (routineDeleteFailure !== undefined) return { ok: false as const, error: { message: routineDeleteFailure } }
+    const removed = routineRows.some(row => row.name === request.name)
+    routineRows = routineRows.filter(row => row.name !== request.name)
+    return { ok: true as const, value: { name: request.name, removed } }
+  })
+  /** Seed the Host's whole schedule before or after the page reads it. */
+  const seedRoutines = (rows: ReadonlyArray<Record<string, unknown>>): void => { routineRows = [...rows] }
+  /** Make the next routine reads fail, or clear the failure. */
+  const failRoutineRead = (message?: string): void => { routineReadFailure = message }
+  /** Make the next routine saves fail, or clear the failure. */
+  const failRoutineSave = (message?: string): void => { routineSaveFailure = message }
+  /** Make the next routine deletes fail, or clear the failure. */
+  const failRoutineDelete = (message?: string): void => { routineDeleteFailure = message }
   const changes = vi.fn(async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
     let pending = false
     let resume: (() => void) | undefined
@@ -484,7 +531,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; workspaceId?: s
   // refuses by contract.
   runtime.remote.provideNamespaces({
     session: { modelCatalog },
-    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewChannels, inbox, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, clearMemberContext, archiveMember, joinChannel, removeChannelMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, changes, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
+    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewChannels, inbox, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, clearMemberContext, archiveMember, joinChannel, removeChannelMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, changes, routines, saveRoutine, deleteRoutine, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
   })
   Object.assign(runtime.remote, {
     $stream: <T,>(options: ConstructorParameters<typeof RemoteStream<T>>[1]) => new RemoteStream(connection, options),
@@ -516,5 +563,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; workspaceId?: s
   const disposeSettings = runtime.slots.register({ name: 'sidebar.settings', priority: 0 }, BaselineSettings as never)
   const team = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
-  return { runtime, team, view, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, joinWorkspace, leaveWorkspace, addMember, status, viewChannels, createChannel, updateChannel, archiveChannel, putAttachment, getAttachment, updateMember, recoverMember, clearMemberContext, archiveMember, modelCatalog, joinChannel, removeChannelMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, publishAgentReply, publishPresence, seedChannel, publishChannelUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession }
+  return { runtime, team, view, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, joinWorkspace, leaveWorkspace, addMember, status, viewChannels, createChannel, updateChannel, archiveChannel, putAttachment, getAttachment, updateMember, recoverMember, clearMemberContext, archiveMember, modelCatalog, joinChannel, removeChannelMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, publishAgentReply, publishPresence, seedChannel, publishChannelUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, routines, saveRoutine, deleteRoutine, seedRoutines, failRoutineRead, failRoutineSave, failRoutineDelete, openSession }
 }

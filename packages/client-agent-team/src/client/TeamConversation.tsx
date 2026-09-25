@@ -3,10 +3,11 @@ import type { TeamConversationProps } from './slots.ts'
 import { useHumanIdentity } from './human-identity.ts'
 import { TeamChannelPage } from './TeamChannelPage.tsx'
 import { TeamInboxPage } from './TeamInboxPage.tsx'
+import { TeamRoutinesPage } from './TeamRoutinesPage.tsx'
 import { TeamThreadPage } from './TeamThreadPage.tsx'
 import css from './conversation.module.css'
 
-export function TeamConversation({ t, useWorkspaces, navigation, drafts, humanIdentity, putAttachment, getAttachment, loadChannels, readThread, loadThreadHistory, threadObservations, subscribeChanges, loadMembers, loadInbox, sendMessage, joinChannel, removeChannelMember, reply, changeTask, promoteThread, selectThread, selectChannel, selectWorkspace, backToWorkspace, backToChannels, resolveTaskRefs, resolveThreadRefs, openMemberSession }: TeamConversationProps) {
+export function TeamConversation({ t, useWorkspaces, navigation, drafts, humanIdentity, putAttachment, getAttachment, loadChannels, readThread, loadThreadHistory, threadObservations, subscribeChanges, loadMembers, loadInbox, loadRoutines, saveRoutine, deleteRoutine, sendMessage, joinChannel, removeChannelMember, reply, changeTask, promoteThread, selectThread, selectChannel, selectWorkspace, backToWorkspace, backToChannels, resolveTaskRefs, resolveThreadRefs, openMemberSession }: TeamConversationProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
   // Every seat names and draws the Human from this one projection: the
   // localized fallback stands only until the first profile read lands.
@@ -21,6 +22,12 @@ export function TeamConversation({ t, useWorkspaces, navigation, drafts, humanId
     // along for the same reason it rides on the other two faces: a row that
     // names or draws the reader must draw the one identity every seat draws.
     return <TeamInboxPage key="inbox" useWorkspaces={useWorkspaces} loadInbox={loadInbox} subscribeChanges={subscribeChanges} selectWorkspace={selectWorkspace} selectThread={selectThread} humanName={humanName} {...(identity.avatarUrl === undefined ? {} : { humanAvatarUrl: identity.avatarUrl })} t={t} />
+  }
+  if (navigationState.routines === true) {
+    // The routine page is the Inbox's sibling global face: routines belong to the
+    // Host rather than to a Workspace, so the page needs no selected Workspace
+    // and shows the one schedule every Workspace shares.
+    return <TeamRoutinesPage key="routines" useWorkspaces={useWorkspaces} loadRoutines={loadRoutines} saveRoutine={saveRoutine} deleteRoutine={deleteRoutine} loadMembers={loadMembers} t={t} />
   }
   if (current !== undefined && navigationState.threadRef !== undefined) {
     return <TeamThreadPage key={navigationState.threadRef} humanName={humanName} {...(identity.avatarUrl === undefined ? {} : { humanAvatarUrl: identity.avatarUrl })} workspaceId={current.workspaceId} putAttachment={putAttachment} threadRef={navigationState.threadRef} backToWorkspace={backToWorkspace} selectChannel={selectChannel} selectThread={selectThread} resolveTaskRefs={resolveTaskRefs} resolveThreadRefs={resolveThreadRefs} openMemberSession={openMemberSession} {...(navigationState.channelRef === undefined ? {} : { channelRef: navigationState.channelRef })} {...(navigationState.taskRef === undefined ? {} : { taskRef: navigationState.taskRef })} {...(navigationState.taskNumber === undefined ? {} : { taskNumber: navigationState.taskNumber })} drafts={drafts} getAttachment={getAttachment} readThread={readThread} loadChannels={loadChannels} loadThreadHistory={loadThreadHistory} threadObservations={threadObservations} subscribeChanges={subscribeChanges} loadMembers={loadMembers} reply={reply} changeTask={changeTask} promoteThread={promoteThread} t={t} />

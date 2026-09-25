@@ -17,6 +17,14 @@ export interface TeamNavigationSnapshot {
    * reload reopens the page. Read markers only move through Thread reads.
    */
   inbox?: boolean
+  /**
+   * Durable position of the routine page — the schedule the Host fires while
+   * nobody is talking. A sibling face of the Inbox: selecting it clears the
+   * Channel/Thread faces and the Inbox, and a reload reopens the page. Like the
+   * Inbox it is navigation state, never schedule state: the page re-reads the
+   * Host's own list, which a routine save does not announce through `changes`.
+   */
+  routines?: boolean
   /** Runtime-only Member Session embedded in the conversation seat; never persisted. */
   memberSessionId?: SessionId
   /** Runtime-only session to restore when the Member view closes; never persisted. */
@@ -30,11 +38,15 @@ function readSnapshot(): TeamNavigationSnapshot {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '') as Partial<TeamNavigationSnapshot>
     const hasThread = typeof parsed.threadRef === 'string'
+    // The two global faces are mutually exclusive; a snapshot claiming both is
+    // not something a writer here can produce, so the routine page wins.
+    const routines = parsed.routines === true
     return {
       mode: parsed.mode === 'team' ? 'team' : 'conversation',
       ...(typeof parsed.workspaceId === 'string' ? { workspaceId: parsed.workspaceId as WorkspaceId } : {}),
       ...(typeof parsed.channelRef === 'string' ? { channelRef: parsed.channelRef as AgentTeamChannelRef } : {}),
-      ...(parsed.inbox === true ? { inbox: true } : {}),
+      ...(parsed.inbox === true && !routines ? { inbox: true } : {}),
+      ...(routines ? { routines: true } : {}),
       ...(hasThread ? {
         threadRef: parsed.threadRef as AgentTeamThreadRef,
         ...(typeof parsed.taskRef === 'string' ? { taskRef: parsed.taskRef as AgentTeamTaskRef } : {}),
@@ -49,12 +61,13 @@ function readSnapshot(): TeamNavigationSnapshot {
 function persistSnapshot(snapshot: TeamNavigationSnapshot): void {
   if (typeof localStorage === 'undefined') return
   try {
-    const { mode, workspaceId, channelRef, taskRef, threadRef, taskNumber, inbox } = snapshot
+    const { mode, workspaceId, channelRef, taskRef, threadRef, taskNumber, inbox, routines } = snapshot
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       mode,
       ...(workspaceId === undefined ? {} : { workspaceId }),
       ...(channelRef === undefined ? {} : { channelRef }),
       ...(inbox === true ? { inbox: true } : {}),
+      ...(routines === true ? { routines: true } : {}),
       ...(taskRef === undefined ? {} : { taskRef }),
       ...(threadRef === undefined ? {} : { threadRef }),
       ...(taskNumber === undefined ? {} : { taskNumber }),
@@ -72,6 +85,8 @@ export interface TeamNavigationActions {
   selectThread: (threadRef: AgentTeamThreadRef, channelRef?: AgentTeamChannelRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void
   /** Open the Human mention-Inbox page; clears the Channel/Thread faces. */
   selectInbox: () => void
+  /** Open the routine page; clears the Channel/Thread faces and the Inbox. */
+  selectRoutines: () => void
   backToWorkspace: () => void
   /** Leave the selected Channel for the workspace Channel list; keeps mode and Workspace. */
   backToChannels: () => void
@@ -105,6 +120,7 @@ export class TeamNavigation {
       selectChannel: channelRef => { this.clearMemberSession(); this.setChannel(channelRef) },
       selectThread: (threadRef, channelRef, taskRef, taskNumber) => { this.clearMemberSession(); this.setThread(threadRef, channelRef, taskRef, taskNumber) },
       selectInbox: () => { this.clearMemberSession(); this.setInbox() },
+      selectRoutines: () => { this.clearMemberSession(); this.setRoutines() },
       backToWorkspace: () => { this.clearMemberSession(); this.setThread(undefined) },
       backToChannels: () => { this.clearMemberSession(); this.clearChannel() },
       enterMemberSession: (sessionId, returnToSessionId) => { this.setMemberSession(sessionId, returnToSessionId) },
@@ -144,24 +160,35 @@ export class TeamNavigation {
   }
 
   private setWorkspace(workspaceId: WorkspaceId): void {
-    if (this.snapshot.workspaceId === workspaceId && this.snapshot.inbox !== true) return
-    const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+    if (this.snapshot.workspaceId === workspaceId && this.snapshot.inbox !== true && this.snapshot.routines !== true) return
+    const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, routines: _routines, ...base } = this.snapshot
     this.snapshot = { ...base, workspaceId }
     this.commit()
   }
 
   private setChannel(channelRef: AgentTeamChannelRef): void {
-    if (this.snapshot.channelRef === channelRef && this.snapshot.threadRef === undefined && this.snapshot.inbox !== true) return
-    const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+    if (this.snapshot.channelRef === channelRef && this.snapshot.threadRef === undefined && this.snapshot.inbox !== true && this.snapshot.routines !== true) return
+    const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, routines: _routines, ...base } = this.snapshot
     this.snapshot = { ...base, channelRef }
     this.commit()
   }
 
   /** The Inbox is a face, not workspace content: selecting a Workspace leaves it. */
   private setInbox(): void {
-    if (this.snapshot.inbox === true && this.snapshot.channelRef === undefined && this.snapshot.threadRef === undefined) return
-    const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = this.snapshot
+    if (this.snapshot.inbox === true && this.snapshot.channelRef === undefined && this.snapshot.threadRef === undefined && this.snapshot.routines !== true) return
+    const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, routines: _routines, ...base } = this.snapshot
     this.snapshot = { ...base, inbox: true }
+    this.commit()
+  }
+
+  /**
+   * The routine page is the Inbox's sibling: the same global seat, so selecting
+   * it clears the Inbox and the Channel/Thread faces rather than nesting.
+   */
+  private setRoutines(): void {
+    if (this.snapshot.routines === true && this.snapshot.channelRef === undefined && this.snapshot.threadRef === undefined && this.snapshot.inbox !== true) return
+    const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+    this.snapshot = { ...base, routines: true }
     this.commit()
   }
 
@@ -173,12 +200,12 @@ export class TeamNavigation {
   }
 
   private setThread(threadRef: AgentTeamThreadRef | undefined, channelRef?: AgentTeamChannelRef, taskRef?: AgentTeamTaskRef, taskNumber?: number): void {
-    if (this.snapshot.threadRef === threadRef && this.snapshot.taskRef === taskRef && this.snapshot.channelRef === channelRef && this.snapshot.taskNumber === taskNumber && this.snapshot.inbox !== true) return
+    if (this.snapshot.threadRef === threadRef && this.snapshot.taskRef === taskRef && this.snapshot.channelRef === channelRef && this.snapshot.taskNumber === taskNumber && this.snapshot.inbox !== true && this.snapshot.routines !== true) return
     if (threadRef === undefined) {
       const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = this.snapshot
       this.snapshot = base
     } else {
-      const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+      const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, routines: _routines, ...base } = this.snapshot
       this.snapshot = {
         ...base,
         threadRef,

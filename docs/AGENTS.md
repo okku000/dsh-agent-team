@@ -23,7 +23,7 @@ A change that invalidates a documented fact updates the owning document in the s
 | Layout, typography, colour, or identity | [`frontend-design/layout-and-typography.md`](frontend-design/layout-and-typography.md) |
 | A Team component or its states | [`frontend-design/components.md`](frontend-design/components.md) |
 | Timeline scrolling, the composer, entry rows, or status pills | [`frontend-design/thread-and-composer.md`](frontend-design/thread-and-composer.md) |
-| The sidebar browser or the Inbox surface | [`frontend-design/sidebar-browser.md`](frontend-design/sidebar-browser.md) |
+| The sidebar browser, the Inbox surface, or the routine surface | [`frontend-design/sidebar-browser.md`](frontend-design/sidebar-browser.md) |
 | Refresh semantics, copy, accessibility, or evolution | [`frontend-design/refresh-copy-accessibility.md`](frontend-design/refresh-copy-accessibility.md) |
 | Setup, the verification gradient, or which check a change needs | [`development/start-and-checks.md`](development/start-and-checks.md) |
 | Browser evidence, generated files, package seams, or adding a Host operation | [`development/generated-and-seams.md`](development/generated-and-seams.md) |

@@ -24,6 +24,9 @@ import type {
   AgentTeamReplyRequest,
   AgentTeamResolveTaskRefsRequest,
   AgentTeamResolveThreadRefsRequest,
+  AgentTeamRoutinesRequest,
+  AgentTeamSaveRoutineRequest,
+  AgentTeamDeleteRoutineRequest,
   AgentTeamTaskRequest,
   AgentTeamUpdateChannelRequest,
   AgentTeamUpdateMemberRequest,
@@ -187,6 +190,12 @@ function registerModeShadow<T extends object>(
               promoteThread: (request: AgentTeamPromoteThreadRequest) => ctx.remote.agentTeam.promoteThread(request),
               resolveTaskRefs: (request: AgentTeamResolveTaskRefsRequest) => ctx.remote.agentTeam.resolveTaskRefs(request),
               resolveThreadRefs: (request: AgentTeamResolveThreadRefsRequest) => ctx.remote.agentTeam.resolveThreadRefs(request),
+              // The routine page: the Host's own schedule, which a routine save
+              // changes without emitting a Team `changes` event, so the page
+              // re-reads after its own mutations instead of waiting for a wake.
+              loadRoutines: (request: AgentTeamRoutinesRequest) => ctx.remote.agentTeam.routines(request),
+              saveRoutine: (request: AgentTeamSaveRoutineRequest) => ctx.remote.agentTeam.saveRoutine(request),
+              deleteRoutine: (request: AgentTeamDeleteRoutineRequest) => ctx.remote.agentTeam.deleteRoutine(request),
             } : {}),
             ...(name === 'sidebar.workspaces' ? {
               addMember: (request: AgentTeamAddMemberRequest) => ctx.remote.agentTeam.addMember(request),

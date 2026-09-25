@@ -13,6 +13,12 @@ import type {
   AgentTeamCreateChannelResult,
   AgentTeamInbox,
   AgentTeamInboxRequest,
+  AgentTeamRoutinesRequest,
+  AgentTeamRoutinesResult,
+  AgentTeamSaveRoutineRequest,
+  AgentTeamSaveRoutineResult,
+  AgentTeamDeleteRoutineRequest,
+  AgentTeamDeleteRoutineResult,
   AgentTeamJoinWorkspaceRequest,
   AgentTeamJoinWorkspaceResult,
   AgentTeamLeaveWorkspaceRequest,
@@ -157,6 +163,10 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   loadMembers: (request: AgentTeamMembersRequest) => Promise<RemoteResult<readonly AgentTeamClientMemberStatus[]>>
   /** Human direct-only Inbox slice; the Inbox page merges one call per visible Workspace. */
   loadInbox: (request: AgentTeamInboxRequest) => Promise<RemoteResult<AgentTeamInbox>>
+  /** The Host's whole routine schedule; the page reads it once, since a routine belongs to no Workspace. */
+  loadRoutines: (request: AgentTeamRoutinesRequest) => Promise<RemoteResult<AgentTeamRoutinesResult>>
+  saveRoutine: (request: AgentTeamSaveRoutineRequest) => Promise<RemoteResult<AgentTeamSaveRoutineResult>>
+  deleteRoutine: (request: AgentTeamDeleteRoutineRequest) => Promise<RemoteResult<AgentTeamDeleteRoutineResult>>
   /** Human-only Thread Attention observations; the Thread composer ranks the returned followers first. */
   threadObservations: (request: AgentTeamThreadObservationsRequest) => Promise<RemoteResult<AgentTeamThreadObservations>>
   /** Agent-card session jump, shared by every slot; message member chips reuse it. */

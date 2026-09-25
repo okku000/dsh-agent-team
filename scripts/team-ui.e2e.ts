@@ -19,6 +19,7 @@ const UI06_SHOTS = join(BROWSER_ARTIFACTS, 'ui-06')
 const UI07_SHOTS = join(BROWSER_ARTIFACTS, 'ui-07')
 const UI08_SHOTS = join(BROWSER_ARTIFACTS, 'ui-08')
 const UI09_SHOTS = join(BROWSER_ARTIFACTS, 'ui-09')
+const UI10_SHOTS = join(BROWSER_ARTIFACTS, 'ui-10')
 let scaffold: WebScaffold | undefined
 let browser: Browser | undefined
 
@@ -256,6 +257,7 @@ async function installLocalBundle(clearArtifacts = true): Promise<void> {
   await mkdir(UI07_SHOTS, { recursive: true })
   await mkdir(UI08_SHOTS, { recursive: true })
   await mkdir(UI09_SHOTS, { recursive: true })
+  await mkdir(UI10_SHOTS, { recursive: true })
 }
 
 it('drives the complete opt-in Agent Team journey in real Web', async () => {
@@ -529,16 +531,24 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('role') ?? '')).toBe('menuitem')
   await page.keyboard.press('Escape')
   await expect.poll(() => page.evaluate(() => document.activeElement?.matches('[data-team-workspace-trigger]') ?? false)).toBe(true)
-  // The Inbox is the one entry that crosses Workspaces — its total sums every
-  // one of them — so it stands above the selector that scopes the sections
-  // below it rather than inside that scope.
-  const [workspaceTriggerBox, inboxCardBox] = await Promise.all([
+  // The Inbox and the routine entry are the two destinations that cross
+  // Workspaces — the Inbox's total sums every one of them, and a routine belongs
+  // to the Host rather than to any of them — so the pair stands above the
+  // selector that scopes the sections below it rather than inside that scope.
+  const [workspaceTriggerBox, inboxCardBox, routinesCardBox] = await Promise.all([
     workspaceTrigger.boundingBox(),
-    page.locator('button[class*="inboxCard"]').boundingBox(),
+    page.locator('button[data-team-inbox-card]').boundingBox(),
+    page.locator('button[data-team-routines-card]').boundingBox(),
   ])
   expect(workspaceTriggerBox).not.toBeNull()
   expect(inboxCardBox).not.toBeNull()
+  expect(routinesCardBox).not.toBeNull()
   expect(workspaceTriggerBox!.y).toBeGreaterThan(inboxCardBox!.y)
+  // The pair is one seat, so the second card sits in the same column as the
+  // first and above the selector, not beside either.
+  expect(routinesCardBox!.y).toBeGreaterThan(inboxCardBox!.y)
+  expect(workspaceTriggerBox!.y).toBeGreaterThan(routinesCardBox!.y)
+  expect(routinesCardBox!.x).toBe(inboxCardBox!.x)
 
   const builderRow = page.locator('[class*="agentRow"]').filter({ hasText: 'builder' }).first()
   await builderRow.hover()
@@ -1567,7 +1577,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // fresh taskless Thread so the assertions stay independent of earlier
   // segments.
   const inboxWorkspace = scaffold.ctx.workspaceRegistry.list()[0]!
-  const inboxCard = page.locator('button[class*="inboxCard"]')
+  const inboxCard = page.locator('button[data-team-inbox-card]')
   const railInboxButton = page.locator('nav[class*="railWorkspace"] button[aria-label*="收件箱"]')
   // The sidebar states unread as a mark rather than a number, so the entry's own
   // accessible name is the only place the quantity is written down — which is how
@@ -1665,13 +1675,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id }).totalUnreadCount).toBe(baseUnread + 3)
   await expectSidebarUnread(String(baseUnread + 3))
 
-  // Narrow rail: 收件箱 → Channels → Agents, unread marked on the first icon, and
-  // the icon is a destination that opens the Inbox page and expands the sidebar.
+  // Narrow rail: 收件箱 → 定时任务 → Channels → Agents, unread marked on the first
+  // icon, and the Inbox icon is a destination that opens the Inbox page and
+  // expands the sidebar.
   await page.setViewportSize({ width: 390, height: 844 })
   const inboxRail = page.locator('nav[class*="railWorkspace"]')
   await inboxRail.waitFor()
   const railLabels = await inboxRail.locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
-  expect(railLabels).toEqual([`收件箱，${baseUnread + 3} 条未读`, '频道', 'Agents'])
+  expect(railLabels).toEqual([`收件箱，${baseUnread + 3} 条未读`, '定时任务', '频道', 'Agents'])
   await expectSidebarUnread(String(baseUnread + 3))
   // The dot replaced the number on the surface, so the rail's hover hint is where
   // a reader still meets the quantity without opening the page: the same name the
@@ -1689,7 +1700,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-narrow-rail.png'), fullPage: true })
   await railInboxButton.click()
   await page.locator('[data-team-inbox]').waitFor()
-  await expect.poll(() => page.locator('button[class*="inboxCard"]').count()).toBe(1)
+  await expect.poll(() => page.locator('button[data-team-inbox-card]').count()).toBe(1)
   await expect.poll(async () => await inboxRow.count()).toBe(1)
   await expect.poll(async () => await inboxRow.textContent()).toContain('#delivery')
   const plainRow = page.locator('[data-team-inbox] button').filter({ hasText: '工程侧同步，无需决策' })
@@ -1830,8 +1841,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // is the ink the row that named the reader wears. It is a mark rather than a
   // shrunken capsule, so it is measured as one — a count that comes back here
   // would fail the first assertion.
-  expect(await page.locator('button[class*="inboxCard"] [data-team-count-badge]').count()).toBe(0)
-  const inboxDot = page.locator('button[class*="inboxCard"] [data-team-inbox-dot]')
+  expect(await page.locator('button[data-team-inbox-card] [data-team-count-badge]').count()).toBe(0)
+  const inboxDot = page.locator('button[data-team-inbox-card] [data-team-inbox-dot]')
   await expect.poll(async () => await inboxDot.count()).toBe(1)
   const dotInk = await ink(inboxDot)
   expect(dotInk.background).toBe(namedInk.background)
@@ -1965,7 +1976,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expectSidebarUnread(baseUnread === 0 ? '1' : String(baseUnread + 1))
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
-  await page.locator('button[class*="inboxCard"]').click()
+  await page.locator('button[data-team-inbox-card]').click()
   await page.locator('[data-team-inbox]').waitFor()
   // Wait on the section rather than on a row count: a row count of zero is also
   // what the entry frame shows, so only the section proves the fetch settled.
@@ -1994,7 +2005,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expectSidebarUnread(baseUnread === 0 ? null : String(baseUnread))
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
-  await page.locator('button[class*="inboxCard"]').click()
+  await page.locator('button[data-team-inbox-card]').click()
   await page.locator('[data-team-inbox]').waitFor()
   await page.locator('[data-team-inbox]').getByRole('heading', { name: '最近活跃' }).waitFor({ timeout: 30_000 })
   await expect.poll(async () => await page.locator('[data-team-inbox]').getByRole('heading', { name: '需要我' }).count()).toBe(0)
@@ -2003,7 +2014,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => await inboxRow.locator('[data-team-count-badge]').count()).toBe(0)
   await expect.poll(async () => await plainRow.locator('[data-team-count-badge]').count()).toBe(0)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-page-recent.png'), fullPage: true })
-  await expect.poll(async () => await page.locator('button[class*="inboxCard"]').getAttribute('aria-current')).toBe('page')
+  await expect.poll(async () => await page.locator('button[data-team-inbox-card]').getAttribute('aria-current')).toBe('page')
 
   // Both Threads above are taskless, so they only ever exercise the fallback: a
   // row names whoever moved a Thread nobody claimed. A Task's row is the case the
@@ -2086,6 +2097,118 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(stackBox.width).toBe(clusterWidth(stackItem.claimOwners.length))
   expect(stackBox.inset).toBe(stackBox.width + 8)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-row-owners-desktop.png'), fullPage: true })
+
+  // ── The routine surface (定时任务) ───────────────────────────────────────
+  // The Inbox's sibling. A routine is Host configuration rather than a ledger
+  // fact, so this page crosses Workspaces exactly as the Inbox does, and it is
+  // the one place a routine is written without a profile edit. The journey drives
+  // the real form and then reads the schedule back through the same Remote the
+  // page called, so what the screenshots show is a store the Host really wrote.
+  const routinesCard = page.locator('button[data-team-routines-card]')
+  await routinesCard.click()
+  const routinePage = page.locator('[data-team-routines]')
+  await routinePage.waitFor()
+  // This Host holds no routine, and the page says so in the shared empty language
+  // rather than drawing a dead list.
+  await routinePage.getByText('还没有定时任务').waitFor()
+  expect(scaffold.ctx.agentTeam.routines({ workspaceId: inboxWorkspace.id }).routines).toHaveLength(0)
+  // The two global faces are one seat: the marker moves to the routine entry and
+  // the Inbox card gives it up.
+  await expect.poll(async () => await routinesCard.getAttribute('aria-current')).toBe('page')
+  await expect.poll(async () => await page.locator('button[data-team-inbox-card]').getAttribute('aria-current')).toBeNull()
+  // Creating is offered even on an empty schedule: the empty state is where a new
+  // reader arrives.
+  await expect.poll(async () => await routinePage.getByRole('button', { name: '新建定时任务' }).count()).toBe(1)
+  await page.screenshot({ path: join(UI10_SHOTS, 'routines-empty-desktop.png'), fullPage: true })
+
+  // The form mirrors the Host's own rules, so a fixable mistake is named before
+  // anything is sent: this submit has no name and must not reach the Host.
+  await routinePage.getByRole('button', { name: '新建定时任务' }).click()
+  const routineCreate = page.getByRole('dialog', { name: '新建定时任务' })
+  await routineCreate.waitFor()
+  await routineCreate.getByRole('button', { name: '保存' }).click()
+  await expect.poll(async () => await routineCreate.getByRole('alert').textContent()).toContain('名称只能以字母或数字开头')
+  expect(scaffold.ctx.agentTeam.routines({ workspaceId: inboxWorkspace.id }).routines).toHaveLength(0)
+
+  // The wake target is a global Member catalog rather than a Workspace roster —
+  // a routine may wake a Member that shares no Channel with the reader — and the
+  // value it stores is the branded Member id, not the handle it displays.
+  const routineTarget = scaffold.ctx.agentTeam.members()
+    .find((entry: { member: { state: string } }) => entry.member.state === 'enabled')!.member
+  await routineCreate.locator('select').selectOption(routineTarget.memberId)
+  await routineCreate.getByLabel('名称').fill('nightly-check')
+  await routineCreate.getByLabel('指令').fill('ROUTINE-MARKER 检查模型目录有没有变化')
+  await routineCreate.getByRole('button', { name: '保存' }).click()
+  await expect.poll(async () => await page.getByRole('dialog').count()).toBe(0)
+  const routineRow = routinePage.locator('article').filter({ hasText: 'nightly-check' })
+  await expect.poll(async () => await routineRow.count()).toBe(1)
+  const routineText = await routineRow.textContent()
+  expect(routineText).toContain(`唤醒 @${routineTarget.handle}`)
+  expect(routineText).toContain('ROUTINE-MARKER')
+  expect(routineText).toContain('每 3600 秒')
+  expect(routineText).toContain('持续重复')
+  // A stored routine is editable; the row says where it came from.
+  expect(await routineRow.getAttribute('data-origin')).toBe('store')
+  expect(await routineRow.getByRole('button', { name: '编辑' }).count()).toBe(1)
+  expect(await routineRow.getByRole('button', { name: '删除' }).count()).toBe(1)
+  // The Host holds what the page drew — the write really landed, and the page
+  // re-read it rather than drawing its own optimism.
+  const storedRoutine = scaffold.ctx.agentTeam.routines({ workspaceId: inboxWorkspace.id }).routines
+  expect(storedRoutine).toHaveLength(1)
+  expect(storedRoutine[0]).toMatchObject({
+    name: 'nightly-check',
+    origin: 'store',
+    declaration: {
+      name: 'nightly-check', member: routineTarget.memberId,
+      prompt: 'ROUTINE-MARKER 检查模型目录有没有变化', once: false, everySeconds: 3600,
+    },
+  })
+  await page.screenshot({ path: join(UI10_SHOTS, 'routines-created-desktop.png'), fullPage: true })
+
+  // The name is the identity, so an edit keeps it fixed and upserts in place: one
+  // routine still, and the changed instruction is the one now stored.
+  await routineRow.getByRole('button', { name: '编辑' }).click()
+  const routineEdit = page.getByRole('dialog', { name: '编辑定时任务' })
+  await routineEdit.waitFor()
+  expect(await routineEdit.getByLabel('名称').isDisabled()).toBe(true)
+  await routineEdit.getByLabel('指令').fill('ROUTINE-MARKER-EDITED 改成检查发布分支')
+  await routineEdit.getByRole('button', { name: '保存' }).click()
+  await expect.poll(async () => await page.getByRole('dialog').count()).toBe(0)
+  await expect.poll(async () => await routineRow.textContent()).toContain('ROUTINE-MARKER-EDITED')
+  const editedRoutine = scaffold.ctx.agentTeam.routines({ workspaceId: inboxWorkspace.id }).routines
+  expect(editedRoutine).toHaveLength(1)
+  expect(editedRoutine[0]!.declaration.prompt).toBe('ROUTINE-MARKER-EDITED 改成检查发布分支')
+
+  // The 390 face: the schedule and its row stay inside the viewport, and the entry
+  // is the rail's second icon because the wide card is not drawn there.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  const routineRail = page.locator('nav[class*="railWorkspace"] button[aria-label="定时任务"]')
+  await expect.poll(async () => await routineRail.count()).toBe(1)
+  await page.screenshot({ path: join(UI10_SHOTS, 'routines-narrow.png'), fullPage: true })
+  // Expanded before the width returns, the way the Inbox leg leaves the rail: the
+  // sections below read a sidebar that is really there.
+  await routineRail.click()
+  await page.locator('[data-sidebar-collapsed]').waitFor({ state: 'detached' })
+  await settleLayout(page)
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+
+  // Deleting is confirmed first, and the row leaves through the Host's list rather
+  // than by dropping itself locally.
+  await routineRow.getByRole('button', { name: '删除' }).click()
+  const routineConfirm = page.getByRole('dialog', { name: '删除「nightly-check」？' })
+  await routineConfirm.waitFor()
+  await routineConfirm.getByRole('button', { name: '删除' }).click()
+  await expect.poll(async () => await page.getByRole('dialog').count()).toBe(0)
+  await expect.poll(async () => await routinePage.getByText('还没有定时任务').count()).toBe(1)
+  expect(scaffold.ctx.agentTeam.routines({ workspaceId: inboxWorkspace.id }).routines).toHaveLength(0)
+
+  // Back to the Inbox, which is the face this leg found on screen: the sections
+  // below leave and re-enter Team mode, and the restored page is that one.
+  await page.locator('button[data-team-inbox-card]').click()
+  await page.locator('[data-team-inbox]').waitFor()
 
   // Losing the Host connection surfaces the failure in two places, and both
   // must read as states rather than as drift: the Channel body centers in the
@@ -2218,10 +2341,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
 
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
-  await page.locator('button[class*="inboxCard"]').focus()
+  await page.locator('button[data-team-inbox-card]').focus()
   await page.keyboard.press('Space')
   await page.locator('[data-team-inbox]').waitFor()
-  const inboxEntry = page.locator('button[class*="inboxCard"]')
+  const inboxEntry = page.locator('button[data-team-inbox-card]')
   await expect.poll(async () => await inboxEntry.getAttribute('aria-current')).toBe('page')
 
   // An Agent card is the one Team row a reader can open from the Inbox page, and
@@ -2523,7 +2646,7 @@ it('configures the Human profile from Settings in real Web', async () => {
   // leads with the profile picture in the very circle an Agent's initial fills
   // — the same seat, the same 18px geometry — and the row reads the display
   // name rather than the durable `member:human` id no Agent roster holds.
-  await page.locator('button[class*="inboxCard"]').click()
+  await page.locator('button[data-team-inbox-card]').click()
   const identityRow = page.locator('[data-team-inbox] button').filter({ hasText: 'PROFILE-NAME-MARKER' })
   await expect.poll(async () => await identityRow.count(), { timeout: 30_000 }).toBe(1)
   const identityStack = identityRow.locator('[class*="rowActor"] [role="img"]')

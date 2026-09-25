@@ -153,6 +153,7 @@ describe('TeamNavigation', () => {
       // The Inbox entry is Team navigation too, and the one face an Agent
       // overlay can be opened from: asking for the page closes the overlay.
       navigation => { navigation.actions().selectInbox() },
+      navigation => { navigation.actions().selectRoutines() },
       navigation => { navigation.actions().backToChannels() },
       navigation => { navigation.actions().backToWorkspace() },
       navigation => { navigation.actions().enterTeam() },
@@ -194,6 +195,40 @@ describe('TeamNavigation', () => {
     navigation.actions().selectChannel('channel:2' as never)
     expect(navigation.getSnapshot().inbox).toBeUndefined()
     navigation.actions().selectInbox()
+    navigation.actions().selectWorkspace('workspace:two' as never)
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:two' })
+  })
+
+  it('opens the routine page as the Inbox\'s sibling global face', () => {
+    const navigation = new TeamNavigation()
+    navigation.actions().selectWorkspace('workspace:one' as never)
+    navigation.actions().enterTeam()
+    navigation.actions().selectRoutines()
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', routines: true })
+    // Like the Inbox, the page is a durable location rather than an unread fact.
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({ mode: 'team', workspaceId: 'workspace:one', routines: true })
+    expect(new TeamNavigation().getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', routines: true })
+    // Re-selecting the open page spams nobody.
+    navigation.actions().selectRoutines()
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', routines: true })
+
+    // The two global faces replace each other rather than nesting: one seat,
+    // so a stored snapshot that somehow carries both resolves to one.
+    navigation.actions().selectInbox()
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', inbox: true })
+    navigation.actions().selectRoutines()
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', routines: true })
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode: 'team', inbox: true, routines: true }))
+    expect(new TeamNavigation().getSnapshot()).toEqual({ mode: 'team', routines: true })
+
+    // A Thread, Channel, or Workspace selection leaves the routine page, and
+    // Back never lands on it: the page is not pushed onto the back path.
+    navigation.actions().selectThread('thread:1' as never, 'channel:1' as never)
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1', threadRef: 'thread:1' })
+    navigation.actions().selectRoutines()
+    navigation.actions().selectChannel('channel:2' as never)
+    expect(navigation.getSnapshot().routines).toBeUndefined()
+    navigation.actions().selectRoutines()
     navigation.actions().selectWorkspace('workspace:two' as never)
     expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:two' })
   })

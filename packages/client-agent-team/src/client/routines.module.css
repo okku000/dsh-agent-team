@@ -1,0 +1,173 @@
+/* The routine page: the shared conversation seat carries the header band,
+ * column, gutters, and scrollbar; this sheet styles only the schedule cards and
+ * the editor's own seats. Every color rides the shipped DSW aliases so the page
+ * follows the active theme. */
+
+/* One routine carries four facts — what it is called, when it fires, who it
+   wakes, and who asked for it — plus its actions. That does not fit one line
+   without truncating the fact the reader came for, so a routine is a card: the
+   schedule leads with the name, the target and the instruction follow as its
+   evidence, and the attribution closes in the page's quietest ink. */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+}
+
+/* The name is the routine's identity — `save` upserts by it — so it leads and
+   takes the free space; the chips and the actions keep their own width at the
+   right edge and never wrap away from the name they belong to. */
+.cardHead {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.name {
+  color: var(--dsw-alias-label-primary);
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Where the routine came from rides a hairline chip — the same quiet capsule the
+   Inbox gives a Task marker, so the page speaks one kind of chip. A `config`
+   declaration is the operator's and says so; a stored one needs no chip at all
+   beyond its attribution line. */
+.origin {
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  color: var(--dsw-alias-label-secondary);
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 15px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+.actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+/* The schedule leads the card's second line: it is what a routine IS, and it is
+   the line a reader scans down to answer "when does anything happen". */
+.trigger {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Who the fire wakes, and the instruction it injects, are evidence for the
+   schedule above: secondary ink, one line each, clamped rather than wrapped so
+   a long instruction cannot make one card taller than the page's rhythm. */
+.target {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prompt {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  margin-top: 2px;
+}
+
+/* The header's own line: the count, and the sentence that keeps the page's one
+   easy misreading away — a routine wakes a Member and posts nothing. */
+.headerMeta {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+  margin: 4px 0 0;
+}
+.headerCount {
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* The editor's trigger choice: two labelled radios on one line, so the field
+   reads as one decision rather than two independent settings. */
+.radios {
+  display: flex;
+  gap: 16px;
+}
+.radio {
+  align-items: center;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  line-height: 20px;
+}
+/* A prompt is a sentence or two, not a line: the shared Input atom is a
+   single-line control, so the instruction gets the same chrome on a textarea.
+   The Member picker wears the same chrome on a native select, because the list
+   is short and a native control keeps the keyboard and screen-reader behaviour
+   the reader already has. */
+.textarea,
+.select {
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  padding: 6px 10px;
+  width: 100%;
+}
+.textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+.textarea:disabled,
+.select:disabled {
+  color: var(--dsw-alias-label-tertiary);
+}
+/* One optional field rides a second column beside its sibling so the dialog
+   does not grow a line per option; it collapses to one column on a narrow
+   seat rather than squeezing either control below its usable width. */
+.pair {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 520px) {
+  .pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

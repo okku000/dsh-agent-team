@@ -4,7 +4,7 @@ English | [中文](sidebar-browser.zh.md)
 
 The Workspace is one selector line, not a list. Channels and Agents below it belong to exactly one Workspace; collapsing it into a single trigger makes the sidebar read as "you are in X, and here is X's content" and returns the rows a low-frequency switch was holding.
 
-Nothing is hidden by that collapse — Workspace rows carry no unread mark of their own, and cross-Workspace unread is summarized by the Inbox entry, which stays above the selector: that entry's total sums every visible Workspace, so it is the one destination the selector does not scope, and it must not read as one of the rows under the line that names a single Workspace. When there is no Workspace to state — an empty roster, or a selection the roster no longer carries — the browser says so in the selector's own seat instead of rendering a dead field.
+Nothing is hidden by that collapse — Workspace rows carry no unread mark of their own, and cross-Workspace unread is summarized by the Inbox entry, which stays above the selector: that entry's total sums every visible Workspace, so it is one of the destinations the selector does not scope, and it must not read as one of the rows under the line naming a single Workspace. When there is no Workspace to state — an empty roster, or a selection the roster no longer carries — the browser says so in the selector's own seat instead of rendering a dead field.
 
 The trigger is the bordered single-choice field shape the creation forms already use (`.workspaceTrigger`, 12px radius, 34px line, `aria-haspopup="menu"` plus `aria-expanded`), so the line that says where the reader is does not read as the first entry of the Channels list; it carries the selected folder tint permanently because it is always showing a selection, states the selection as its own text with the full path on `title`, and opens the public `Menu` with the current Workspace checked.
 
@@ -22,7 +22,7 @@ Row ellipsis menus use public `Menu`, are visible on hover/focus/menu-open, and 
 
 Channel and Agent editors use public Remote mutations and Host projections rather than optimistic inline edits. Agent model selection uses the public menu and Host model directory; changing an active model preserves Member and Session identity. Selecting an Agent opens its embedded Session without leaving Team mode; explicit Team navigation closes that overlay.
 
-When a Member rolls over to a fresh context through `context_rollover`, the Agents panel observes the old→new Session binding and follows exactly once — only when the embedded page equals the observed old live Session id — and never redirects an archive view; the manual clear-context row action is retired. The narrow rail's three icon buttons read top-down Inbox (`IconQueueOutline14` at 16px) → Channels (`IconListPenOutline16`) → Agents (`IconAgentPresetOutline16`); none reuse the checklist (Task) or member icons.
+When a Member rolls over to a fresh context through `context_rollover`, the Agents panel observes the old→new Session binding and follows exactly once — only when the embedded page equals the observed old live Session id — and never redirects an archive view; the manual clear-context row action is retired. The narrow rail's four icon buttons read top-down Inbox (`IconQueueOutline14`) → Routines (`IconAlarmClockOutlineRegular`) → Channels (`IconListPenOutline16`) → Agents (`IconAgentPresetOutline16`), all at 16px; none reuse the Task or member icons.
 
 The Inbox icon is a destination: clicking it opens the Inbox page and expands the sidebar; the Channels/Agents icons expand the sidebar and focus their section header. Agent creation carries no Channel page and the Agent editor carries no membership section: Channel membership is managed from the Channel side (create-dialog initial members, Channel editor member rows, and the member-management dialog); a Channel-less Member stays reachable through its DM view.
 
@@ -39,7 +39,7 @@ Team mode stands the sidebar's global chrome down the same way: the shipped New 
 SlotCore cannot withdraw another plugin's list row and the entry's label is localized, so the rule keys off the mode attribute and the shipped `panelList` class substring instead of the copy; ordinary conversations keep both, and the browser test pins the transition from both sides — visible before entering Team, present but hidden inside it.
 
 ## Inbox (收件箱)
-The Inbox entry is one card on the wide rail above the Workspace selector — its total sums the unread of every visible Workspace, so it is the one destination that outlives the scope the selector names, and it leads the sidebar instead of standing inside that scope — and the rail's first icon on the narrow rail, where no selector exists to lead.
+The Inbox entry is the leading card of the two the wide rail puts above the Workspace selector — its total sums the unread of every visible Workspace, so it is one of the destinations that outlive the scope the selector names, and it leads the sidebar instead of standing inside that scope — and the rail's first icon on the narrow rail, where no selector exists to lead.
 
 Both mark unread the same way — a dot on the icon's top-left corner, standing for the sum of each visible Workspace's whole-unread Inbox total with mentions counted inside it rather than alone, and rendering nothing at zero: no unread is the absence of the mark, not an empty dot.
 
@@ -55,7 +55,7 @@ The number lives in the control's accessible name on both rails (`收件箱，6 
 
 While the Inbox page stands, the card/icon carries `aria-current="page"` — and the rail icon wears the card's own current-page fill, because the icon-only rail has no label and the fill is the only thing that can say where the reader is.
 
-`TeamConversation` renders a fourth face: Thread | Channel | Inbox | welcome. Selecting Inbox clears the Channel/Thread faces; selecting a Workspace, Channel, or Thread clears the Inbox. From an Inbox row, Back lands on that row's Channel — the Inbox is never pushed onto the back path; re-enter it through the card or the rail icon.
+`TeamConversation` renders a fifth face: Thread | Channel | Inbox | Routines | welcome. Selecting Inbox or Routines clears the Channel/Thread faces and clears the other global face with it; selecting a Workspace, Channel, or Thread clears whichever global face is up. From an Inbox row, Back lands on that row's Channel — the Inbox is never pushed onto the back path; re-enter it through the card or the rail icon.
 
 ### Page frame and header
 
@@ -116,3 +116,23 @@ The empty state speaks the shared empty-state language — the same 13px `strong
 While the page is open it subscribes once without a change scope and refetches the list on every wake; closed, the fetches stop.
 
 The badge subscribes the same way for its totals and re-pulls only totals (`limit: 1`), never lists. The badge additionally refreshes from every completed durable Thread read: the Host's changes stream deliberately never wakes on reads (a read changes no shared projection), but the read consumes this reader's unread facts, markers included.
+
+## Routines (定时任务)
+
+The routine page is the Inbox's sibling and takes the second card above the Workspace selector, and the rail's second icon — `IconAlarmClockOutlineRegular` at 16px, in the same 36px button. It is where a reader sees everything the Host fires on its own and writes, changes, or removes an entry without a profile edit or a Host restart. Its card takes `aria-current="page"` on the Inbox card's own terms: while that page stands and no embedded Member Session covers it.
+
+Nothing on the page is scoped by the Workspace selector, and neither is anything it reads. A routine names one Agent Member and one instruction and touches no Channel, no Thread, and no Message, so the Host answers its whole schedule to any caller bound to a Workspace that exists — the Workspace on the read is a fence, not a scope.
+
+The page therefore reads once through the first visible Workspace and draws that one list instead of merging a slice per Workspace, which would repeat every row. The Member picker reads the same way, one catalog call with no Workspace, because a routine may wake a Member that shares no Channel with this page.
+
+A row answers, in reading order, what the routine is, when it fires, who it wakes, and who asked for it. The trigger repeats the instant the declaration was written with rather than re-localizing it, so a reader who wrote `+09:00` reads back the instant they meant; the wake target is drawn as `@handle` resolved from the roster, falling back to the declaration's own text when the roster no longer carries that Member, because that target is what the Host will fire at; and the attribution names who saved the routine and when.
+
+Only a stored routine is editable. An entry the operator declared in the profile's own `config.routines` is marked as such and offers no edit or delete, because that entry belongs to a file the Client must not rewrite, and a button the Host would refuse is worse than saying where the row comes from.
+
+The editor is one dialog: the name, the Member to wake, the instruction, an optional summary, and exactly one trigger — a repeating interval of at least 60 seconds, aligned to an optional `anchorAt` and stoppable after its first delivery, or a single absolute instant. The name is the identity, so creating asks for it while editing keeps it fixed.
+
+The form validates what the Host validates — a name that cannot be a log line, a missing Member or instruction, an interval under a minute, an instant with no offset — and names the offending field before the save is attempted. A declaration the Host refuses comes back as the Host's own reason, with the dialog still open and the running schedule untouched.
+
+The page re-reads when it opens and after its own saves and deletes instead of waiting for a wake, and it subscribes to nothing: a routine save is Host configuration rather than a ledger fact, so it emits no Team `changes` event. Deleting is behind a confirmation that states what stays. Failures render as the shared error surface with one retry, and a failed read is never drawn as an empty schedule.
+
+The page lists the schedule, not the fires. A fire's outcome — a delivery, or a refusal such as an unknown or unactivated Member — is recorded in the Host's own fire log (see [the routines contract](../../packages/agent-team/README.md)), and no Remote reads that log yet.

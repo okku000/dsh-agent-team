@@ -4,7 +4,7 @@
 
 工作区是单行选择器，不是列表。其下的「频道」「Agents」只属于当前这一个 Workspace；收成一个触发器后，侧栏读作「你在 X ＋ 这是 X 的内容」，并把一个低频切换占据的行数还给下面的列表。
 
-折叠不丢信息——工作区行本就不带未读标记，跨 Workspace 未读由收件箱入口汇总，所以那个入口留在选择器**之上**：它的合计取自每个可见 Workspace，是选择器范围之外、唯一跨范围的目的地，不能被读成「点名某个 Workspace 的那行」下面的一行。没有 Workspace 可写时——名册为空，或选择已不在名册里——浏览器就在选择器自己的座位上说明这件事，而不是画一个死掉的字段。
+折叠不丢信息——工作区行本就不带未读标记，跨 Workspace 未读由收件箱入口汇总，所以那个入口留在选择器**之上**：它的合计取自每个可见 Workspace，是选择器范围之外跨范围的目的地之一，不能被读成「点名某个 Workspace 的那行」下面的一行。没有 Workspace 可写时——名册为空，或选择已不在名册里——浏览器就在选择器自己的座位上说明这件事，而不是画一个死掉的字段。
 
 触发器沿用创建表单里单选字段的带框形态（`.workspaceTrigger`，12px 圆角、34px 行高、`aria-haspopup="menu"` 加 `aria-expanded`），使这行「你在哪」不被读成频道列表的第一项；它常驻 business 色文件夹图标（因为它始终在展示一个选择），以自身文本写出所选 Workspace、完整路径挂 `title`，点击打开公共 `Menu` 并勾选当前项。
 
@@ -18,7 +18,7 @@ Workspace 概览是当前页时它携带 `aria-current='page'`，与原先被选
 
 刻意保持安静：折叠头无 hover 底色，仅 chevron 变色反馈；不展示分区计数。行形态：频道行保留 `#` 标识；Agent 行复用头像语言并叠加 presence 角标。行内元数据（成员计数、presence 文字）已移除，保持列表简洁。
 
-定位高亮单一化（对齐宿主会话树「父静叶亮」的惯例）：任一时刻侧栏只有一行携带 `aria-current='page'` 与 hover 底色——打开频道/Thread 时是频道行，成员会话视图打开时是被选 Agent 卡片（`.agentSelect[aria-current='page']`），否则是工作区选择器（其概览为当前页时）。嵌入的成员会话是唯一能压在「读者仍身处其上的 Team 面」之上的覆盖层——那可能是 Inbox 页，也可能是他打开该 Agent 时所处的频道/Thread——此时高亮归它自己的 Agent 卡片：下层那个面保留原位但不携带高亮，覆盖层关闭后原样取回（Inbox 入口同样如此，它的页面在屏上时才是被标记的那一行）。
+定位高亮单一化（对齐宿主会话树「父静叶亮」的惯例）：任一时刻侧栏只有一行携带 `aria-current='page'` 与 hover 底色——打开频道/Thread 时是频道行，成员会话视图打开时是被选 Agent 卡片（`.agentSelect[aria-current='page']`），否则是工作区选择器（其概览为当前页时）。嵌入的成员会话是唯一能压在「读者仍身处其上的 Team 面」之上的覆盖层——那可能是 Inbox 页，也可能是他打开该 Agent 时所处的频道/Thread——此时高亮归它自己的 Agent 卡片：下层那个面保留原位但不携带高亮，覆盖层关闭后原样取回（Inbox 与定时任务两个入口同样如此，各自的页面在屏上时才是被标记的那一行）。
 
 行级 ⋯ 菜单：`TeamRowMenu` 复用公共 `Menu`（`portal` + `closeOnPointerLeave`，锚为裸 ellipsis 图标按钮），hover / focus-within / 菜单开启三种状态可见；菜单开启时该行钉住 hover 底色（`data-menu-open`）。菜单含「编辑」入口，打开对应编辑器；error 态成员额外出现「恢复」项，走 `recoverMember` Remote（Host 向该成员活跃会话 steer 续作 prompt，运行时动作、不落 ledger）。历史上的「从全新上下文开始」入口已移除——Member 经 `context_rollover` 工具自管上下文，Host 侧 clear-context Remote 保留为无可见入口的迁移逃生门。
 
@@ -30,7 +30,7 @@ Agent 卡片会话视图：Agent 行的头像与文案整体是选择按钮（`�
 
 Member 经 `context_rollover` 换新上下文时，Agents 面板观察该 Member 的旧→新 Session 绑定，仅在嵌入页正是被观察的旧 live Session id 时恰好跟随一次，归档视图不跳转。
 
-窄屏 rail 三个图标按钮自上而下：收件箱（`IconQueueOutline14`，16px）→ 频道（`IconListPenOutline16`）→ Agents（`IconAgentPresetOutline16`）；不复用 checklist（任务）或 user（成员）图标。收件箱图标是目的地：点击打开 Inbox 页并请求展开侧栏；频道/Agents 图标点击请求展开侧栏并聚焦对应分区头部。
+窄屏 rail 四个图标按钮自上而下：收件箱（`IconQueueOutline14`）→ 定时任务（`IconAlarmClockOutlineRegular`）→ 频道（`IconListPenOutline16`）→ Agents（`IconAgentPresetOutline16`），均为 16px；不复用任务或成员图标。收件箱图标是目的地：点击打开 Inbox 页并请求展开侧栏；定时任务图标同理，点击打开定时任务页；频道/Agents 图标点击请求展开侧栏并聚焦对应分区头部。
 
 Agent 创建流程没有频道选择页，Agent 编辑器没有成员区块——频道成员只在频道侧管理（创建对话框初始成员、频道编辑器成员行、成员管理对话框）；未入频道的 Member 仍可经 DM 触达。
 
@@ -48,7 +48,7 @@ slot 选举摘不掉别的插件注册的列表行、入口文案又是本地化
 
 ## 收件箱（Inbox）
 
-「收件箱」入口：宽栏是工作区选择器**之上**的一张卡片——它的合计取自每个可见 Workspace，是选择器所命名的那个范围之外、唯一跨范围的目的地，所以由它领起侧栏，而不是站在那个范围里面；窄轨没有选择器可领起，它就是 rail 第一枚图标。
+「收件箱」入口：宽栏是选择器**之上**两张卡片中的第一张——它的合计取自每个可见 Workspace，是选择器所命名的那个范围之外跨范围的目的地之一，所以由它领起侧栏，而不是站在那个范围里面；窄轨没有选择器可领起，它就是 rail 第一枚图标。
 
 两者用同一套方式标记未读——图标**左上角一个点**，数值取各可见 Workspace 的整片未读 Inbox 合计（mention 只是其中一类），为 0 时不渲染：没有未读就是没有这个记号，而不是画一个空点。点是 8px 的 `--dsw-alias-state-business-primary`——队列给「点名了这位读者」的 Thread 用的同一种实心墨，于是同一个颜色走到哪里都还是「这需要你」——外加 2px 所在表面的描边（`--team-mark-ring`：凡是自己上底色的表面都把当下这层底色交出来——卡片在悬停与当前页时、rail 按钮在悬停、聚焦与当前页时）。
 
@@ -60,7 +60,7 @@ slot 选举摘不掉别的插件注册的列表行、入口文案又是本地化
 
 Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`，窄轨那枚图标还带上卡片同款当前页底色——rail 没有文字，底色是它唯一能说「你在这」的东西；被嵌入的成员会话覆盖期间它只是被记住的位置，不携带高亮。
 
-`TeamConversation` 第四个面：Thread | Channel | Inbox | welcome。选 Inbox 清掉 Channel/Thread 面；选 Workspace、Channel 或 Thread 清掉 Inbox。从 Inbox 行进入 Thread 后，Back 落在该行 Thread 的频道——Inbox 不进返回栈；再进 Inbox 走左侧卡片或窄轨图标。
+`TeamConversation` 第五个面：Thread | Channel | Inbox | 定时任务 | welcome。选 Inbox 或定时任务会清掉 Channel/Thread 面，并互相清掉对方；选 Workspace、Channel 或 Thread 清掉当前那个全局面。从 Inbox 行进入 Thread 后，Back 落在该行 Thread 的频道——Inbox 不进返回栈；再进 Inbox 走左侧卡片或窄轨图标。
 
 ### 页面框架与页头
 
@@ -109,3 +109,23 @@ Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`，窄轨
 空态讲**共享空态语言**（与 Channel/Thread 同一套 13px `strong` 标题 + 12px 提示），文案「收件箱是空的」+「你参与的 Thread 有新活动、或有人提到你时，会出现在这里」；loading/error/retry 复用共享对话类，后台刷新失败保留行并以 `role='alert'`、`--dsw-alias-state-error-primary` 报告。
 
 Inbox 页打开时订一次无 scope 的 changes，唤醒重拉列表，离开即停。徽标同法订阅，唤醒只重拉合计（`limit: 1`），绝不拉列表。徽标还会在每次 durable Thread read 完成后直接刷新——Host 的 changes 对 read 刻意不唤醒（read 不改变任何共享 projection），但该 read 消费了读者自己的未读（含 mention marker）。
+
+## 定时任务（Routines）
+
+定时任务页是收件箱的同胞：占据选择器**之上**两张卡片中的第二张，也是窄轨第二枚图标——`IconAlarmClockOutlineRegular`，16px，同一个 36px 按钮盒。读者在这里看到 Host 自己会触发的一切，并在不编辑 profile、不重启 Host 的前提下新建、修改或删除一条。它的卡片按与 Inbox 卡片相同的条件携带 `aria-current='page'`：该页在屏上、且没有被嵌入的成员会话覆盖时。
+
+页面上没有任何东西被工作区选择器限定，它读的东西也一样。一条定时任务只点名一个 Agent Member 和一句指令，不碰 Channel、Thread、Message，所以 Host 对任何绑定了「存在的工作区」的调用者都返回整份排程——读请求上的那个 Workspace 是栅栏，不是作用域。
+
+因此页面只用第一个可见 Workspace 读一次，把那一份列表画出来，而不是按 Workspace 合并切片（那会把每一行都重复一遍）。Member 选择器同理：一次不带 Workspace 的名册调用，因为定时任务可能唤醒一个与此页没有共同 Channel 的 Member。
+
+一行按阅读顺序回答：这条任务是什么、何时触发、唤醒谁、谁要求的。触发方式复述声明里写下的那个时刻本身、不重新本地化，所以写下 `+09:00` 的读者读回的就是他要的那个时刻；唤醒目标画成经名册解析出的 `@handle`，名册里已经没有这个 Member 时回落到声明原文——因为那才是 Host 真正会触发的东西；归属行写明是谁、何时保存的。
+
+只有 store 里的条目可编辑。操作者在 profile 自己的 `config.routines` 里声明的条目会被标注为来自 profile，且不提供编辑与删除：那条属于一个 Client 不应改写的文件，而一个 Host 会拒绝的按钮比说明这行从哪来更糟。
+
+编辑器是一个弹层：名称、要唤醒的 Member、指令、可选摘要，以及恰好一种触发方式——至少 60 秒的重复间隔（可对齐到可选的 `anchorAt`，并可只触发一次后停止），或一个绝对时刻。名称即身份：新建时询问，编辑时固定不变。
+
+表单先校验 Host 会校验的东西——不能成为日志行的名称、缺 Member 或指令、小于一分钟的间隔、没有 offset 的时刻——并在发起保存前点名出错字段。Host 拒绝的声明会带着 Host 自己的原因回来，弹层保持打开，正在运行的排程不受影响。
+
+页面在打开时、以及自己保存或删除之后重读，而不是等唤醒，并且什么都不订阅：保存一条定时任务是 Host 配置而非 ledger fact，因此不产生任何 Team `changes` 事件。删除前有确认框，说明哪些东西会保留。失败按共享 error 面渲染并给出一个重试，读失败绝不会被画成空排程。
+
+页面列出的是排程，不是触发结果。一次触发的结果——投递成功，或因 Member 未知／未启用而拒绝——记录在 Host 自己的 fire log 里（见[定时任务契约](../../packages/agent-team/README.md)），目前没有任何 Remote 读这个日志。
