@@ -41,6 +41,8 @@ import { AgentTeamWakeDeliveryError, deliverWake, resolveWakeMember, type AgentT
 import type { MemberSkillSelectionRef } from './member-skills.ts'
 import { classifyRecoverableError, RecoveryCoordinator, RECOVERY_MAX_CONSECUTIVE_ERRORS } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf } from './stored-session-reader.ts'
+import { normalizeRoutines, type RoutineConfig } from './routine-schedule.ts'
+import { deleteStoredRoutine, readStoredRoutines, routineStorePath, saveStoredRoutine, type StoredRoutine } from './routine-store.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { formatTeamTimestamp } from './time-format.ts'
 import type {
@@ -84,6 +86,7 @@ import type {
   AgentTeamLeaveWorkspaceRequest,
   AgentTeamLeaveWorkspaceResult,
   AgentTeamHumanActor,
+  AgentTeamActor,
   AgentTeamMemberActor,
   AgentTeamMessageAttachment,
   AgentTeamMemberId,
@@ -115,6 +118,13 @@ import type {
   AgentTeamRemoveMemberResult,
   AgentTeamReplyRequest,
   AgentTeamReplyResult,
+  AgentTeamRoutine,
+  AgentTeamRoutinesRequest,
+  AgentTeamRoutinesResult,
+  AgentTeamSaveRoutineRequest,
+  AgentTeamSaveRoutineResult,
+  AgentTeamDeleteRoutineRequest,
+  AgentTeamDeleteRoutineResult,
   AgentTeamSendMessageRequest,
   AgentTeamSendMessageResult,
   AgentTeamSetHumanProfileRequest,
@@ -149,6 +159,7 @@ export { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTI
 export { humanAvatarsRoot } from './human-avatar.ts'
 export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
 export { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeRefusalReason, type AgentTeamWakeRequest, type AgentTeamWakeResult } from './member-wake.ts'
+export type { RoutineConfig } from './routine-schedule.ts'
 
 /** Process-stable marker carried by the final Team message tool definition. */
 export const AGENT_TEAM_PRESET_MARKER = Symbol.for('@wowyuarm/dsh-agent-team.preset')
@@ -427,6 +438,13 @@ export default class AgentTeam extends TypertRemoteService {
   }>()
   private readonly pressurePolicy: PressurePolicyCoordinator
   private readonly notifiedInbox = new Map<AgentTeamMemberId, string>()
+  /**
+   * The routines each operating row declared in its own `config.routines`,
+   * keyed by that row. The row still owns and arms its schedule; this Host keeps
+   * the declarations only to report them as declared there and to refuse a save
+   * that would shadow one.
+   */
+  private readonly routineDeclarations = new Map<string, readonly RoutineConfig[]>()
   private attachmentGcTimer?: ReturnType<typeof setInterval> | undefined
   /**
    * New-release check behind the settings footnote. Memory-only and
@@ -1545,6 +1563,40 @@ export default class AgentTeam extends TypertRemoteService {
     return this.requireLedger().view(request)
   }
 
+  /**
+   * Human routine listing: every routine this Host schedules, the store's
+   * entries and the operator's own row declarations alike.
+   *
+   * The schedule is Host configuration rather than a ledger fact, so this read
+   * is scoped by nothing but the Workspace the caller is looking at: one store
+   * belongs to the whole Host.
+   */
+  @Remote('routines')
+  routines(request: AgentTeamRoutinesRequest): AgentTeamRoutinesResult {
+    this.requireWorkspace(request.workspaceId)
+    return Object.freeze({ routines: this.routineEntries() })
+  }
+
+  /**
+   * Human routine save: upsert one routine by name.
+   *
+   * Saving is validated before it is written, so a declaration this Host cannot
+   * run is refused whole and the routines that already run stay exactly as they
+   * were. A name the operator declared on an operating row is refused rather
+   * than shadowed, because that file is theirs and this API never rewrites it.
+   */
+  @Remote('saveRoutine')
+  saveRoutine(request: AgentTeamSaveRoutineRequest): AgentTeamSaveRoutineResult {
+    return this.saveRoutineAs(this.humanCall(request.workspaceId), request)
+  }
+
+  /** Human routine deletion by name; a name the store does not hold removes nothing. */
+  @Remote('deleteRoutine')
+  deleteRoutine(request: AgentTeamDeleteRoutineRequest): AgentTeamDeleteRoutineResult {
+    this.humanCall(request.workspaceId)
+    return this.deleteRoutineAs(request)
+  }
+
   /** Agent-only top-level Thread start. Workspace identity is verified against the live binding. */
   async sendMessageForAgent(agent: Agent, request: AgentTeamSendMessageRequest): Promise<AgentTeamSendMessageResult> {
     return this.sendMessageAs(this.memberCall(agent, request.workspaceId), request)
@@ -1723,6 +1775,28 @@ export default class AgentTeam extends TypertRemoteService {
     return deliverWake(member, handle, request)
   }
 
+  /**
+   * Publish the routines an operating row holds in its own `config.routines`.
+   *
+   * The row that arms a schedule is the only thing that knows what its own
+   * configuration declares, and the routine API has to know too: that is how a
+   * declared entry reports as declared there rather than as saved here, and how
+   * a save is refused instead of shadowing the operator's own declaration.
+   * Arming stays the row's — this Host never runs a schedule itself.
+   * @param source - the publishing row, so two producers cannot overwrite each other's report.
+   * @param declarations - that row's own entries, exactly as its operator wrote them.
+   * @returns the disposer that withdraws them, called when the row unloads.
+   */
+  declareRoutines(source: string, declarations: readonly RoutineConfig[]): () => void {
+    const published = Object.freeze([...declarations])
+    this.routineDeclarations.set(source, published)
+    return () => {
+      // Only the publication still in place may withdraw itself: a row reload
+      // mounts the new one before the old effect is disposed.
+      if (this.routineDeclarations.get(source) === published) this.routineDeclarations.delete(source)
+    }
+  }
+
   threadHistoryForAgent(agent: Agent, request: AgentTeamThreadHistoryRequest): AgentTeamThreadHistory {
     const actor = this.memberActor(agent)
     this.requireAgentWorkspace(actor, request.workspaceId)
@@ -1748,6 +1822,33 @@ export default class AgentTeam extends TypertRemoteService {
       const title = this.ctx.workspaceRegistry.get(participation.workspaceId)?.title
       return title === undefined ? participation : Object.freeze({ ...participation, title })
     })) })
+  }
+
+  /**
+   * Agent-only routine listing: the whole schedule, because "what is
+   * scheduled?" has one answer for the Host rather than one per Workspace.
+   * Participation in the named Workspace is still required, so a Member cannot
+   * use this read to address a Workspace it is not in.
+   */
+  routinesForAgent(agent: Agent, request: AgentTeamRoutinesRequest): AgentTeamRoutinesResult {
+    const actor = this.memberActor(agent)
+    this.requireAgentWorkspace(actor, request.workspaceId)
+    return Object.freeze({ routines: this.routineEntries() })
+  }
+
+  /**
+   * Agent-only routine save. A Member schedules work in a Workspace it
+   * participates in, and a post routine may only target that Workspace; the
+   * recorded author is the live Member, never something the call supplies.
+   */
+  saveRoutineForAgent(agent: Agent, request: AgentTeamSaveRoutineRequest): AgentTeamSaveRoutineResult {
+    return this.saveRoutineAs(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  /** Agent-only routine deletion by name. */
+  deleteRoutineForAgent(agent: Agent, request: AgentTeamDeleteRoutineRequest): AgentTeamDeleteRoutineResult {
+    this.memberCall(agent, request.workspaceId)
+    return this.deleteRoutineAs(request)
   }
 
   /** Validate the durable ledger against an independently replayed projection. */
@@ -2440,6 +2541,88 @@ export default class AgentTeam extends TypertRemoteService {
 
   private requireAgentWorkspace(actor: AgentTeamMemberActor, workspaceId: AgentTeamViewRequest['workspaceId']): void {
     if (!this.requireLedger().participatesIn(actor.memberId, workspaceId)) throw new Error('Member cannot mutate another Workspace')
+  }
+
+  /**
+   * One routine as the routine API reports it: the declaration as written, plus
+   * the attribution only the store holds.
+   *
+   * The bookkeeping keys are stripped from the declaration, so a caller binds
+   * one shape whether it is reading a routine or saving one — and a declaration
+   * the operator wrote on a producer row reports with none of it, because it was
+   * never saved here.
+   */
+  private routineView(entry: StoredRoutine, origin: AgentTeamRoutine['origin']): AgentTeamRoutine {
+    const { createdBy, createdAt, updatedBy, updatedAt, ...declaration } = entry
+    const identity = { name: entry.name, origin, declaration: Object.freeze(declaration) }
+    if (origin === 'config') return Object.freeze(identity)
+    return Object.freeze({
+      ...identity,
+      ...(createdBy === undefined ? {} : { createdBy }),
+      ...(createdAt === undefined ? {} : { createdAt }),
+      ...(updatedBy === undefined ? {} : { updatedBy }),
+      ...(updatedAt === undefined ? {} : { updatedAt }),
+    })
+  }
+
+  /**
+   * Every routine this Host schedules: the store's entries, then each
+   * declaration an operating row published whose name the store does not
+   * already own.
+   *
+   * That is exactly the shadow rule the armed schedule applies, so the report
+   * and the schedule cannot disagree about which declaration runs.
+   * @throws Error when the store exists but cannot be read or cannot run.
+   */
+  private routineEntries(): readonly AgentTeamRoutine[] {
+    const stored = readStoredRoutines(routineStorePath())
+    const shadowed = new Set(stored.map(entry => entry.name))
+    return Object.freeze([
+      ...stored.map(entry => this.routineView(entry, 'store')),
+      ...[...this.routineDeclarations.values()].flat()
+        .filter(declaration => !shadowed.has(declaration.name))
+        .map(declaration => this.routineView(declaration, 'config')),
+    ])
+  }
+
+  /**
+   * The operating row whose own config declares `name`, when the store does not
+   * already own that name. A name the store holds is the store's to replace.
+   */
+  private declaredRoutineOwner(name: string): string | undefined {
+    if (readStoredRoutines(routineStorePath()).some(entry => entry.name === name)) return undefined
+    for (const [source, declarations] of this.routineDeclarations) {
+      if (declarations.some(declaration => declaration.name === name)) return source
+    }
+    return undefined
+  }
+
+  /** The shared save behind the Human Remote and the agent tool. */
+  private saveRoutineAs(author: AgentTeamActor, request: AgentTeamSaveRoutineRequest): AgentTeamSaveRoutineResult {
+    const declaration = request.routine
+    const name = typeof declaration?.name === 'string' ? declaration.name : ''
+    // The declaration is validated as the row's validator validates one, so a
+    // store entry and a config entry can never mean different things.
+    normalizeRoutines([declaration], name === '' ? 'routine' : `routine '${name}'`)
+    if (declaration.kind === 'post' && declaration.workspaceId !== request.workspaceId) {
+      throw new Error(`a post routine's workspaceId must be '${request.workspaceId}', the Workspace this call belongs to; the declaration names '${String(declaration.workspaceId)}'`)
+    }
+    const owner = this.declaredRoutineOwner(declaration.name)
+    if (owner !== undefined) {
+      throw new Error(`routine '${declaration.name}' is declared by the operator on the '${owner}' row; saving it here would leave that declaration in place and shadowed — save it under another name, or patch the row`)
+    }
+    const saved = saveStoredRoutine(routineStorePath(), declaration, author, new Date().toISOString())
+    return Object.freeze({ routine: this.routineView(saved.routine, 'store'), created: saved.created })
+  }
+
+  /** The shared deletion behind the Human Remote and the agent tool. */
+  private deleteRoutineAs(request: AgentTeamDeleteRoutineRequest): AgentTeamDeleteRoutineResult {
+    const owner = this.declaredRoutineOwner(request.name)
+    if (owner !== undefined) {
+      throw new Error(`routine '${request.name}' is declared by the operator on the '${owner}' row and is not in the routine store; remove it by patching that row`)
+    }
+    const { removed } = deleteStoredRoutine(routineStorePath(), request.name)
+    return Object.freeze({ name: request.name, removed })
   }
 
   /**

@@ -2,8 +2,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mergeRoutines, readRoutineStore, routineStoreTemporaryPath, watchRoutineStore, writeRoutineStore } from '../src/routine-store.ts'
+import { deleteStoredRoutine, mergeRoutines, readRoutineStore, readStoredRoutines, routineStoreTemporaryPath, saveStoredRoutine, watchRoutineStore, writeRoutineStore } from '../src/routine-store.ts'
 import type { RoutineConfig } from '../src/routine-schedule.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
+import type { AgentTeamMemberId } from '../src/types.ts'
 
 /**
  * The durable routine store: what an operator creates from the GUI. What matters
@@ -97,8 +99,77 @@ describe('routine store writes', () => {
   })
 })
 
-describe('routine store merge', () => {
-  it('lets the store own a name it declares and keeps config-only routines', () => {
+describe('routine store saved entries', () => {
+  const HUMAN = { kind: 'human', memberId: AGENT_TEAM_HUMAN_MEMBER_ID, handle: 'human' } as const
+  const SCOUT = { kind: 'member', memberId: 'member:scout' as AgentTeamMemberId, handle: 'scout' } as const
+  const SAVED_AT = '2026-09-25T09:00:00.000Z'
+  const LATER = '2026-09-25T10:00:00.000Z'
+  const POST = { name: 'standup', kind: 'post', workspaceId: 'workspace:alpha', channel: 'channel:046dd831-c679-4279-b6aa-7813476cf12e', body: 'report your progress', everySeconds: 3600 } as const
+
+  it('records who saved a routine and when, and keeps that creation on a later save', () => {
+    const first = saveStoredRoutine(path, POST, HUMAN, SAVED_AT)
+    expect(first.created).toBe(true)
+    expect(first.routine).toMatchObject({ name: 'standup', createdBy: HUMAN, createdAt: SAVED_AT })
+    expect(first.routine.updatedBy).toBeUndefined()
+
+    const second = saveStoredRoutine(path, { ...POST, body: 'report your progress, briefly' }, SCOUT, LATER)
+    expect(second.created).toBe(false)
+    // The Member replaced the routine; the Human who scheduled it is still on it.
+    expect(second.routine).toMatchObject({ body: 'report your progress, briefly', createdBy: HUMAN, createdAt: SAVED_AT, updatedBy: SCOUT, updatedAt: LATER })
+    expect(readRoutineStore(path, warn)).toEqual([second.routine])
+    expect(warnings).toEqual([])
+  })
+
+  it('keeps the entry where it was when a save replaces it', () => {
+    saveStoredRoutine(path, POST, HUMAN, SAVED_AT)
+    saveStoredRoutine(path, { ...POST, name: 'nightly-sweep' }, HUMAN, SAVED_AT)
+    saveStoredRoutine(path, { ...POST, everySeconds: 600 }, SCOUT, LATER)
+    expect(readRoutineStore(path, warn).map(entry => entry.name)).toEqual(['standup', 'nightly-sweep'])
+  })
+
+  it('never takes attribution from the caller', () => {
+    const forged = { ...POST, createdBy: SCOUT, createdAt: LATER, updatedBy: SCOUT, updatedAt: LATER } as unknown as RoutineConfig
+    const saved = saveStoredRoutine(path, forged, HUMAN, SAVED_AT)
+    expect(saved.routine).toMatchObject({ createdBy: HUMAN, createdAt: SAVED_AT })
+    expect(saved.routine.updatedBy).toBeUndefined()
+  })
+
+  it('deletes by name and reports a name the store does not hold', () => {
+    saveStoredRoutine(path, POST, HUMAN, SAVED_AT)
+    saveStoredRoutine(path, { ...POST, name: 'nightly-sweep' }, HUMAN, SAVED_AT)
+    expect(deleteStoredRoutine(path, 'standup')).toEqual({ removed: true })
+    expect(readRoutineStore(path, warn).map(entry => entry.name)).toEqual(['nightly-sweep'])
+    expect(deleteStoredRoutine(path, 'standup')).toEqual({ removed: false })
+    expect(deleteStoredRoutine(path, 'never-existed')).toEqual({ removed: false })
+  })
+
+  it('refuses a declaration it cannot run and leaves every stored routine untouched', () => {
+    saveStoredRoutine(path, POST, HUMAN, SAVED_AT)
+    const before = readFileSync(path, 'utf8')
+    expect(() => saveStoredRoutine(path, { ...POST, everySeconds: 1 }, HUMAN, LATER)).toThrow(/everySeconds/)
+    expect(readFileSync(path, 'utf8')).toBe(before)
+  })
+
+  it('refuses to write over a store it cannot read', () => {
+    mkdirFor(path)
+    writeFileSync(path, 'not json at all')
+    expect(() => saveStoredRoutine(path, POST, HUMAN, SAVED_AT)).toThrow(/is unusable/)
+    expect(() => deleteStoredRoutine(path, 'standup')).toThrow(/is unusable/)
+    expect(readFileSync(path, 'utf8')).toBe('not json at all')
+  })
+
+  it('treats a store an earlier version wrote as an unattributed routine that still runs', () => {
+    writeRoutineStore(path, [{ ...DECLARED, everySeconds: 600 }])
+    expect(readStoredRoutines(path)).toEqual([{ ...DECLARED, everySeconds: 600 }])
+    const saved = saveStoredRoutine(path, { ...DECLARED, everySeconds: 300 }, HUMAN, SAVED_AT)
+    // The entry that was already there recorded nobody, and this save does not
+    // claim to have created it: it records itself as the change.
+    expect(saved.routine).toMatchObject({ everySeconds: 300, updatedBy: HUMAN, updatedAt: SAVED_AT })
+    expect(saved.routine.createdBy).toBeUndefined()
+  })
+})
+
+describe('routine store merge', () => {  it('lets the store own a name it declares and keeps config-only routines', () => {
     const merged = mergeRoutines(
       [{ ...DECLARED, everySeconds: 600 }],
       [{ ...DECLARED, everySeconds: 3600 }, { ...DECLARED, name: 'nightly-sweep', everySeconds: 86400 }],

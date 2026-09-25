@@ -456,6 +456,10 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   ctx.effect(() => {
+    // Publish the operator's own declarations after they validated above: the
+    // routine API reports them as declared on this row rather than saved into
+    // the store, and refuses to save over a name they own. Arming stays here.
+    const withdrawDeclarations = ctx.agentTeam.declareRoutines(name, config?.routines ?? [])
     const unsubscribe = watchRoutineStore(storePath, () => { rearm() }, warn)
     if (declared.length === 0) {
       ctx.logger.info('agent-team routines: no routines configured')
@@ -464,6 +468,7 @@ export function apply(ctx: Context, config: Config): void {
       scheduler.armAll()
     }
     return () => {
+      withdrawDeclarations()
       unsubscribe()
       scheduler?.dispose()
       scheduler = undefined

@@ -37,6 +37,8 @@ A declaration that cannot run fails while the row mounts, because a routine that
 
 Each fire is appended to `$DSH_HOME/agent-team/routines/fires.jsonl` — the lane and Session id for a delivery, the Channel with the Thread and Message it committed for a post, the wake's reason for a refusal (`post-failed` when the Host refuses a post), `not-armed` for a spent instant — best-effort, warning rather than throwing, and trimmed to its newest 200 lines past 256 KiB. The instruction arrives framed as `[ROUTINE FIRE] <name>` with the Team's fixed UTC+8 instant and the statement that the turn is unattended and nobody is waiting in that conversation for a reply.
 
+The same store is not the operator's alone: the Web Client's routines surface and the `team_routine` tool write it too, so a Member a Human asks in conversation can schedule the work an operator would otherwise declare in the profile. Each stored routine records who saved it and when, while an entry declared in `config.routines` reports as declared there and no tool may overwrite or delete it.
+
 ## Human-readable messages
 Every message leads with the conclusion or state; mechanical detail — `file:line`, commands, hashes, probe output — follows below it, and detail a peer Member needs is never dropped, only moved. Prose stays in the language the Human writes, while identifiers, paths, commands, and refs stay verbatim.
 

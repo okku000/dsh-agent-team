@@ -1,4 +1,4 @@
-# Eight-tool protocol
+# Nine-tool protocol
 
 English | [中文](tools.zh.md)
 
@@ -47,6 +47,14 @@ If the recipient has no live session or the wake fails, the operation stays dura
 `team_claim` lists and mutates only the Agent's own Direction Claims on real Tasks. Taskless Threads have no Claim mutation. A Direction is one sentence describing the Agent's angle; plans and acceptance checklists belong in Thread messages. A successful Claim starts Attention. `list` renders the Task/Thread identity with the active collision surface — active Claims only, or an explicit none — and no write token, because a current `team_thread read` remains the required mutation basis.
 
 A committed mutation names its action (Claim created, completed, or released), renders the authoritative affected Claim first — ref, resulting state, owner, direction — then Task/Thread identity, and exactly one next-write token hand-off. Rejection results (`unread_required`, `stale_revision`) share the message rejection form: `Not committed`, local refs/counts, read-before-retry recovery, and no numeric revision.
+
+## `team_routine`
+
+`team_routine` is the Host's own schedule, not a Session's: `list` answers what fires while nobody is talking, `save` creates or upserts one routine by name, and `delete` removes it. A routine does exactly one thing and declares exactly one trigger — `everySeconds` (an integer of at least 60, aligned to `anchorAt` when given) or one absolute RFC 3339 `at`. The name is the identity, so a save replaces in place and neither mutation needs a revision token: this is configuration, not a ledger fact.
+
+An entry's `kind` picks its action. `wake`, the default, injects `prompt` into one named Member's own Session — only an activated Member with a live session can be woken. `post` commits `body` into a new Thread in one Channel of the calling Workspace, as the Human and verbatim, rendering each `mentions` handle as `@handle` in front of it, because a mention is the only thing that notifies anybody or starts a turn.
+
+Every stored routine records who saved it and when, and that attribution renders on the routine's own line. An entry the operator declared in the profile's own `config.routines` reports origin `config` and cannot be saved over or deleted through the tool. A declaration the Host cannot run is refused whole with the reason, and the routines already running stay as they were; a successful save needs no restart, because the running Host re-arms the schedule when the store changes.
 
 ## `context_rollover`
 

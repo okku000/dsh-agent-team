@@ -26,17 +26,19 @@ Team 自己就附带一个这样的 producer：`wowyuarm-agent-team-routines` �
 
 操作者从 Team GUI 创建的 routine 不能放进那一行：profile 的 YAML 属于操作者，实时编辑不应改写它。这些 routine 与 fire log 放在一起：`$DSH_HOME/agent-team/routines/routines.json`，并经与 `config.routines` 相同的校验器读取。该文件一旦变化，这一行就重新读取并重新 arm 整个 schedule，因此在 GUI 中新增、修改或删除 routine 无需重载 profile、也无需重启 Host 即可生效。store 拥有它声明的任何名字：`config.routines` 中的同名 entry 会被遮蔽而不是重复，所以一个名字始终只 arm 一个 routine、只触发一次。不可用的 store 不会让 schedule 付出代价——只 warn 一次，config 声明的 routine 照常运行；写入先校验后落地、以 rename 落地，因此被拒绝的编辑会保留原文件。
 
+Host 的 routine API 与 `team_routine` 工具写的是同一个 store：`routines`、`saveRoutine`、`deleteRoutine` 既服务 Human Remote 调用方，也服务 Agent Member，都会记下每条 routine 是谁在何时保存的，并报出每条 routine 的 origin（`store` 或 `config`）。`config.routines` 里的 entry 可以被列出，但两条路径都不能覆盖或删除它——store 拒绝遮蔽 operator 声明的东西——而 Host 无法运行的声明会被整体拒绝，已在 arm 的 routine 保持原样。
+
 ## 持久化与生命周期
 
 `storage-domain` 在持久读取处校验每条 record，并拒绝被其他版本标记的 backend unit。Team 只在 `KvTable.put()` 完成后更新 projection。其 Fiber 持有 Domain handle；dispose 通过 Cordis 移除拒绝新的 Service 调用，排空已接受的 Domain write，并在名称可重新打开前关闭 backend unit。
 
-创建 Member 时，先提交稳定的 Member/session/Workspace/preset/private-memory 身份，再执行 unpublished Agent setup。创建 Workspace 记录为 Member 的创建地；更多 Workspace 通过参与操作（`team/member-workspace-joined`/`team/member-workspace-left`）加入与退出——加入即获得协作能力，不移动 Session。Setup 挂载指定 preset，并在发布前检查带 marker 的 `team_message` 和全部八个 Team tools。失败只把该 Member 标为 unavailable。Suspend 等待所属 `AgentHandle` 完全停止；resume 和 Host remount 恢复同一个持久 session。
+创建 Member 时，先提交稳定的 Member/session/Workspace/preset/private-memory 身份，再执行 unpublished Agent setup。创建 Workspace 记录为 Member 的创建地；更多 Workspace 通过参与操作（`team/member-workspace-joined`/`team/member-workspace-left`）加入与退出——加入即获得协作能力，不移动 Session。Setup 挂载指定 preset，并在发布前检查带 marker 的 `team_message` 和全部九个 Team tools。失败只把该 Member 标为 unavailable。Suspend 等待所属 `AgentHandle` 完全停止；resume 和 Host remount 恢复同一个持久 session。
 
 归档（archival）是介于 suspend 与 remove 之间的可逆第三态，Member 与 Channel 通用。`archiveMember` 提交 `team/member-archived`，dispose 活跃 session（私有记忆与 Session log 留在磁盘），把 Session 从分组面归档，并释放该 Member 的活跃 Claim（公开 `claims_released` Activity + Attention/marker 清理）。`archiveChannel` 提交 `team/channel-archived`，对该频道全部 Threads 上所有 owner 做同样的释放。两种归档都保留 Memberships——是隐藏而非离开。归档实体在所有 Team API 面上"默认不存在"：投影、ref 解析（其 Task ref 不再解析，消息正文渲染为纯文本）、按 ref 的读取（`readThread`/`threadHistory`/`threadObservations`/`listClaims` 以明确的 archived 错误拒绝）——而事实在 ledger 中完整保留，供重放与未来恢复；这条边界正是归档与 remove 的分界。从归档态 remove 仍可用（数据卫生路径）；本轮有意不提供恢复入口（对齐 dsh session 归档现状）。
 
 Member 可携带持久能力意图（`capabilities.tools.allow`、`capabilities.skills.allow`）。它随全部 lifecycle operation 原样流转，Host restart 后原样重放，commit 时不做已知名校验（Harness 升级不会破坏旧 ledger）；与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留（当前无 UI 写入路径），供后续 Runtime Revision manifest 编排依赖。编辑语义与 `model` 一致（absent 即清除）：不管理 capabilities 的调用方必须回传已存储的值，否则其编辑会清掉该覆盖。
 
-Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上（mount → restrict → validate），八个 Team tools 在配置之上强制并集；未知名 drop + warning，不使 Member 失败。对 live Member 的 allow-list 编辑在 turn 边界同 Session 换装 restriction——idle 立即生效，与 running turn 竞争的编辑等待其结束，后续 lifecycle 操作在该等待之后排队。restriction 失败只隔离为该 Member 的 activation diagnostic。
+Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上（mount → restrict → validate），九个 Team tools 在配置之上强制并集；未知名 drop + warning，不使 Member 失败。对 live Member 的 allow-list 编辑在 turn 边界同 Session 换装 restriction——idle 立即生效，与 running turn 竞争的编辑等待其结束，后续 lifecycle 操作在该等待之后排队。restriction 失败只隔离为该 Member 的 activation diagnostic。
 
 Skills 是 Member 私有的：preset 不带共享 skill-filesystem row，Host 为每个 Member 注册一个 provider，只扫插件内置的只读 core skills（`packages/agent-team/core-skills/`——`member-skill-manager` meta skill，全部 skill 写作/安装/credentials 引导都在它里面）加该 Member 可写的私有 `skills/` 目录（排除默认 roots）。安装就是往自己目录写——目录形态 `skills/<name>/SKILL.md` + 可选 references/scripts，或平铺 `.md`——有意不提供上传 Remote。persona 只陈述私有空间物理事实，meta skill 的 description 负责"涉及 skill 管理工作时先读我"。`skills.allow` 通过同一 turn 边界换装的 live selection ref 过滤 catalog；自装后的发现由 filesystem watcher 驱动。
 
@@ -54,7 +56,7 @@ M1 支持单个 Host writer。Ledger 永久保留，不提供 snapshot 或 compa
 
 Bundle 使用 Host 已有的 singleton provider，不重复挂载 `agents`、默认模型选择、`tools`、`fs`、`sandboxPolicy`、Session store/persistence、Workspace registry 或 storage 的替代实现。Host services 只挂载一次，再挂载本 Service 及 invariant companion。`/team` 等 Human control 是独立 Consumer。
 
-Team-enabled preset 在自身 Agent scope 注册八个工具，并用 `markAgentTeamPreset()` 标记 `team_message` definition。Preset row 应在执行时读取 `ctx.agentTeam`，不能声明静态 inject：Host 在自身激活期间恢复 Member 时就会挂载成员 preset，声明依赖 `agentTeam` 的 row 无法激活，会让每次启动恢复失败。Scoped tool 重名会在 unpublished setup 阶段失败，只使对应 Member unavailable。Host service provider 重复则仍是 composition error，应删除重复行，不做叠加。
+Team-enabled preset 在自身 Agent scope 注册九个工具，并用 `markAgentTeamPreset()` 标记 `team_message` definition。Preset row 应在执行时读取 `ctx.agentTeam`，不能声明静态 inject：Host 在自身激活期间恢复 Member 时就会挂载成员 preset，声明依赖 `agentTeam` 的 row 无法激活，会让每次启动恢复失败。Scoped tool 重名会在 unpublished setup 阶段失败，只使对应 Member unavailable。Host service provider 重复则仍是 composition error，应删除重复行，不做叠加。
 
 Member 上下文自主管理复用同一 lifecycle owner。`context_rollover` 与 `context_checkpoint` 工具只做校验并结束/锚定 turn；单一 `ContextManagementCoordinator` 监听 Member Session 事件，从 durable 的成功 `tool/call`+`tool/result` 对派生 rollover 与 checkpoint 意图，并经串行 lifecycle queue 执行换窗：等真正 idle、复查 owned-jobs guard、dispose 并归档旧 Session（绝不删除）、提交幂等的 `team/member-session-rolled-over` operation（Member actor、仅限自身、不写 handoff 正文）、激活全新 Session——checkpoint 回返则以精确 completed-turn 前缀作 seed——再送达 handoff 与携带的非 Team 输入。身份、模型、私有记忆、skills、Claims 和 Attention 全部保留；进程内状态在崩溃后可从 durable log 重建，包括重启落在 rollover commit 与新 Session 激活之间时，从 ledger 记录的上一 Session 重建 handoff。第二个 Host 持有的 coordinator（`pressure-policy.ts`）拥有上下文压力：预算阈值从当前 route 的 context window 派生，handoff 预算每 generation 一条通知，硬上限强制原地 compaction 并 fail-closed 验证，provider context-overflow 获得一条有界 compact-and-retry；已接受 Task 的自动 compaction 已退役。Host 侧 clear-context Remote 保留为无可见 Client 入口的迁移逃生门。
 

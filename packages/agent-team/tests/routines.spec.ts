@@ -11,7 +11,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeRequest, type AgentTeamWakeResult } from '../src/member-wake.ts'
 import { routineStorePath, writeRoutineStore } from '../src/routine-store.ts'
-import type { PostAction, PostRoutine, Routine, WakeRoutine } from '../src/routine-schedule.ts'
+import type { PostAction, PostRoutine, Routine, RoutineConfig, WakeRoutine } from '../src/routine-schedule.ts'
 import * as routines from '../src/routines.ts'
 import type { RoutineFireRecord, RoutinePostResult } from '../src/routines.ts'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
@@ -390,9 +390,10 @@ describe('agent-team routines row', () => {
     }
   }
 
-  /** A Host service stub carrying only the wake and the post the row calls. */
-  function host(wakeMember: WakeMember, sendMessage: SendMessage = async () => { throw new Error('this Host cannot post') }) {
-    return { wakeMember, sendMessage } as never
+  /** A Host service stub carrying the wake, the post, and the declaration hook the row calls. */
+  function host(wakeMember: WakeMember, sendMessage: SendMessage = async () => { throw new Error('this Host cannot post') },
+    declareRoutines: (source: string, declarations: readonly RoutineConfig[]) => () => void = () => () => {}) {
+    return { wakeMember, sendMessage, declareRoutines } as never
   }
 
   /** Mount the row the way the loader does, so its `inject` and `effect` are the real ones. */
@@ -610,6 +611,28 @@ describe('agent-team routines row', () => {
     await vi.advanceTimersByTimeAsync(24 * 3_600_000)
 
     expect(wakeMember).not.toHaveBeenCalled()
+  })
+
+  it('publishes its own declarations to the Host and withdraws them when the row unmounts', async () => {
+    const { ctx } = quietContext()
+    const published: Array<{ source: string; declarations: readonly RoutineConfig[] }> = []
+    const withdraw = vi.fn()
+    ctx.provide('agentTeam', host(vi.fn<WakeMember>(), undefined, (source, declarations) => {
+      published.push({ source, declarations })
+      return withdraw
+    }))
+    await mount(ctx, { routines: [{ name: 'hourly', member: 'tes', prompt: 'go', everySeconds: 3600 }] })
+
+    // The row owns its own `config.routines`: it publishes them so the routine
+    // API reports them as declared on this row rather than saved into the store,
+    // and refuses to save over a name they own.
+    expect(published).toHaveLength(1)
+    expect(published[0]!.source).toBe(routines.name)
+    expect(published[0]!.declarations).toEqual([{ name: 'hourly', member: 'tes', prompt: 'go', everySeconds: 3600 }])
+    expect(withdraw).not.toHaveBeenCalled()
+
+    await ctx.fiber.dispose()
+    expect(withdraw).toHaveBeenCalledTimes(1)
   })
 
   it('refuses an unrunnable schedule while the row mounts, so a typo cannot fail silently later', async () => {

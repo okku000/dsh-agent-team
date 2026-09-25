@@ -24,6 +24,13 @@
  * The file is deliberately plain JSON with no Host state of its own: the
  * schedule, not the fire history, is what an operator edits, and every fire is
  * already recorded in the append-only log next to it.
+ *
+ * A routine saved through the Host also records who saved it and when. A
+ * routine posts as the Human, and any Agent Member may create one, so "who
+ * scheduled this?" has to stay answerable after the fact. Those keys are this
+ * store's own: a caller's bookkeeping never enters, and the schedule's
+ * validator reads only the fields it knows, so an entry written before
+ * attribution existed still loads and still runs.
  * @module @wowyuarm/dsh-agent-team/routine-store
  */
 
@@ -31,6 +38,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type
 import { basename, dirname, join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { normalizeRoutines, type Routine, type RoutineConfig } from './routine-schedule.ts'
+import type { AgentTeamActor } from './types/entities.ts'
 
 /** Path segments of the store under the Harness home, beside `fires.jsonl`. */
 const STORE_SEGMENTS = ['agent-team', 'routines', 'routines.json'] as const
@@ -47,31 +55,50 @@ interface StoredRoutineFile {
   readonly routines: readonly RoutineConfig[]
 }
 
+/**
+ * One stored routine: the declaration plus the bookkeeping this store owns.
+ *
+ * `createdBy` is the first save's author and `updatedBy` the last one, so a
+ * routine an agent replaced still reports whose scheduling it was. Both are
+ * optional because a store an earlier version wrote — or an operator edited by
+ * hand — carries neither, and that entry runs exactly the same.
+ */
+export interface StoredRoutine extends RoutineConfig {
+  /** Who first saved this routine through the Host, and when. */
+  readonly createdBy?: AgentTeamActor
+  readonly createdAt?: string
+  /** Who last replaced it through the Host, and when; absent while only the first save has happened. */
+  readonly updatedBy?: AgentTeamActor
+  readonly updatedAt?: string
+}
+
 /** Absolute path of the durable routine store. */
 export function routineStorePath(): string {
   return dshHomePath(...STORE_SEGMENTS)
 }
 
+/** One refusal naming the store and what is wrong with it; the reason is the operator's answer. */
+function storeFault(path: string, condition: 'unreadable' | 'unusable', error: unknown): Error {
+  return new Error(`the routine store at '${path}' is ${condition} (${error instanceof Error ? error.message : String(error)})`)
+}
+
 /**
- * Read the store's declarations.
+ * Read the store's entries exactly as the file holds them, bookkeeping included.
  *
- * The entry shape is validated by the schedule's own validator: a store is a
- * second way to write the same declaration, never a second definition of it.
+ * An absent store is the normal first-run state. Anything else that does not
+ * read back is an error rather than an empty list, because the caller about to
+ * write must never replace routines it could not read.
  * @param path - absolute store path.
- * @param warn - sink for the one warning an unreadable or unusable store produces.
- * @returns the declared routines in file order, or an empty list.
+ * @returns the entries in file order, or an empty list when there is no store.
+ * @throws Error naming the path when the store cannot be read or cannot run.
  */
-export function readRoutineStore(path: string, warn: (message: string) => void): readonly RoutineConfig[] {
+export function readStoredRoutines(path: string): readonly StoredRoutine[] {
   let text: string
   try {
     text = readFileSync(path, 'utf8')
   } catch (error) {
-    // An absent store is the normal first-run state, not a fault: the GUI has
-    // simply never saved anything.
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      warn(`agent-team routines: the routine store at '${path}' is unreadable (${error instanceof Error ? error.message : String(error)}); config-declared routines still run`)
-    }
-    return Object.freeze([])
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Object.freeze([])
+    throw storeFault(path, 'unreadable', error)
   }
   try {
     const parsed: unknown = JSON.parse(text)
@@ -81,7 +108,27 @@ export function readRoutineStore(path: string, warn: (message: string) => void):
     normalizeRoutines(routines)
     return Object.freeze(routines.map(entry => Object.freeze({ ...entry })))
   } catch (error) {
-    warn(`agent-team routines: the routine store at '${path}' is unusable (${error instanceof Error ? error.message : String(error)}); config-declared routines still run`)
+    throw storeFault(path, 'unusable', error)
+  }
+}
+
+/**
+ * Read the store's declarations for the schedule.
+ *
+ * The entry shape is validated by the schedule's own validator: a store is a
+ * second way to write the same declaration, never a second definition of it.
+ * An unusable store costs the schedule its own entries and never the ones the
+ * operator declared on the row, so this reader degrades where
+ * {@link readStoredRoutines} refuses.
+ * @param path - absolute store path.
+ * @param warn - sink for the one warning an unreadable or unusable store produces.
+ * @returns the declared routines in file order, or an empty list.
+ */
+export function readRoutineStore(path: string, warn: (message: string) => void): readonly StoredRoutine[] {
+  try {
+    return readStoredRoutines(path)
+  } catch (error) {
+    warn(`agent-team routines: ${error instanceof Error ? error.message : String(error)}; config-declared routines still run`)
     return Object.freeze([])
   }
 }
@@ -129,6 +176,72 @@ export function mergeRoutines(stored: readonly RoutineConfig[], declared: unknow
   const fromStore = normalizeRoutines(stored)
   const shadowed = new Set(fromStore.map(routine => routine.name))
   return Object.freeze([...fromStore, ...fromConfig.filter(routine => !shadowed.has(routine.name))])
+}
+
+/** The declaration keys this store fills in itself; a caller's own attribution never enters. */
+const STORE_OWNED_KEYS = new Set(['createdBy', 'createdAt', 'updatedBy', 'updatedAt'])
+
+/** One routine's own fields, with the store's bookkeeping keys dropped. */
+function declarationOf(entry: RoutineConfig): RoutineConfig {
+  const fields: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(entry)) {
+    if (!STORE_OWNED_KEYS.has(key)) fields[key] = value
+  }
+  return fields as unknown as RoutineConfig
+}
+
+/**
+ * Save one routine, replacing the entry of that name in place.
+ *
+ * The whole resulting list is validated before anything is written, so a save
+ * the Host cannot run leaves every routine that already runs untouched. The
+ * read-modify-write is synchronous on purpose: one Host serves the GUI Remote
+ * and every Agent tool in one process, and with no `await` between them two
+ * saves cannot interleave and lose one another's entry.
+ * @param path - absolute store path.
+ * @param declaration - the routine to save, as its caller wrote it.
+ * @param author - who is saving it.
+ * @param savedAt - the save instant, ISO 8601.
+ * @returns the stored entry and whether this save created it.
+ * @throws Error when the store cannot be read, or the result cannot run.
+ */
+export function saveStoredRoutine(path: string, declaration: RoutineConfig, author: AgentTeamActor, savedAt: string): { readonly routine: StoredRoutine; readonly created: boolean } {
+  const entries = readStoredRoutines(path)
+  const index = entries.findIndex(entry => entry.name === declaration.name)
+  const previous = index === -1 ? undefined : entries[index]
+  // A replacement keeps the attribution of the save that scheduled the routine
+  // and adds this one: an agent that takes over a name has not thereby become
+  // its creator, and the Human still reads who originally put it there.
+  const attribution = previous === undefined
+    ? { createdBy: author, createdAt: savedAt }
+    : {
+        ...(previous.createdBy === undefined ? {} : { createdBy: previous.createdBy }),
+        ...(previous.createdAt === undefined ? {} : { createdAt: previous.createdAt }),
+        updatedBy: author,
+        updatedAt: savedAt,
+      }
+  const entry: StoredRoutine = Object.freeze({ ...declarationOf(declaration), ...attribution })
+  const next = index === -1 ? [...entries, entry] : entries.map((existing, at) => at === index ? entry : existing)
+  writeRoutineStore(path, next)
+  return Object.freeze({ routine: entry, created: index === -1 })
+}
+
+/**
+ * Delete one routine by name.
+ *
+ * Deleting a name the store does not hold changes nothing and reports so: the
+ * name is the identity, so this operation is idempotent by construction.
+ * @param path - absolute store path.
+ * @param name - the routine name to remove.
+ * @returns whether an entry was removed.
+ * @throws Error when the store cannot be read, or the result cannot run.
+ */
+export function deleteStoredRoutine(path: string, name: string): { readonly removed: boolean } {
+  const entries = readStoredRoutines(path)
+  const next = entries.filter(entry => entry.name !== name)
+  if (next.length === entries.length) return Object.freeze({ removed: false })
+  writeRoutineStore(path, next)
+  return Object.freeze({ removed: true })
 }
 
 /**

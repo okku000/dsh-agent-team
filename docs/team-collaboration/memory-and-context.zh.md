@@ -25,7 +25,7 @@ Pending hints 按 Member 合并。Consumed 或 ignored hint 不会再触发 turn
 
 Web Client 的 Agent-row menu 提供两个 runtime recovery entrances（都不写 ledger）：有 live session 的 error Member 显示「恢复」，由 Host 向 session 注入 continuation prompt（孤儿 composition 则原地重建）；activation failed 的 Member 显示「重启」，由 Host 重新执行该 Member activation，再次失败时仍以 diagnostic 显示在 sidebar。
 
-历史上的第三个入口「从全新上下文开始」已经移除：Member 现在通过 `context_rollover` 工具自行管理上下文（见八工具协议），Host 侧 clear-context Remote 保留为无可见入口的 hidden migration escape hatch，其 `team/member-session-renewed` operation schema 与 replay validation 保留，旧 ledger 仍可 replay。模型发起的 rollover 期间（ledger 绑定已迁移、新 Session 尚未就绪），Member 状态短暂显示为 unavailable 并带 "context rollover in progress" diagnostic；若该 Member 的 Session 正嵌入右栏，Client 只在旧→新绑定变化且当前页面正是被观察的旧 live Session 时跟随一次到新 Session，归档视图不会跳转。
+历史上的第三个入口「从全新上下文开始」已经移除：Member 现在通过 `context_rollover` 工具自行管理上下文（见九工具协议），Host 侧 clear-context Remote 保留为无可见入口的 hidden migration escape hatch，其 `team/member-session-renewed` operation schema 与 replay validation 保留，旧 ledger 仍可 replay。模型发起的 rollover 期间（ledger 绑定已迁移、新 Session 尚未就绪），Member 状态短暂显示为 unavailable 并带 "context rollover in progress" diagnostic；若该 Member 的 Session 正嵌入右栏，Client 只在旧→新绑定变化且当前页面正是被观察的旧 live Session 时跟随一次到新 Session，归档视图不会跳转。
 
 ## Assembled acceptance
 `npm run test:browser` 使用 credential-free Harness Web scaffold 验证 public Client 与 Host chain。代表性 trace 会执行默认 taskless top-level Thread、默认关闭的 Human「作为任务」control、Human promotion 与 Host reread、taskless header/Claim gating；还要求 Human 第二次发送确认以邀请未关注的 Agent，验证 Agent durable Inbox 与 explicit read/reply，然后验证 Human Channel 和 Thread state。Desktop、390×844 和 keyboard paths 都属于 assembled acceptance。Page reload 会从 Host projections 读取同一批 facts，然后 journey 离开 Team mode 并确认 ordinary DSH conversation surface 恢复。

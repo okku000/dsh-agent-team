@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderText, teamTools, occurrences } from './render-text.ts'
 
 /**
- * Discriminating render tests for the five model-facing Team tools.
+ * Discriminating render tests for the six model-facing Team tools.
  * Renders are the only channel a tool result reaches the model through, so
  * each test locks the presence AND absence of exactly the fields the next
  * decision needs. Absence assertions target field labels/concepts —
@@ -499,6 +499,88 @@ describe('team_claim renders the affected Claim', () => {
     expect(stale).toContain('Not committed — the Thread changed after your last read (stale_revision).')
     expect(stale).not.toContain('8387')
     expect(stale).not.toContain('8394')
+  })
+})
+
+describe('team_routine renders the schedule and the routine it changed', () => {
+  const SAVED_BY = { kind: 'member', memberId: 'member:scheduler', handle: 'scheduler' }
+
+  it('list: one header count split by origin, one line per routine, and no write token', () => {
+    const text = renderText(teamTools().get('team_routine')!, { action: 'list' }, {
+      kind: 'listed',
+      routines: [
+        { name: 'morning-catalog', origin: 'store', kind: 'wake', trigger: 'everySeconds', everySeconds: 3600,
+          member: 'scout', prompt: 'Check the catalog', createdBy: SAVED_BY, createdAt: '2026-09-08T01:00:00.000Z' },
+        { name: 'evening-digest', origin: 'store', kind: 'post', trigger: 'everySeconds', everySeconds: 86400, once: true,
+          channelRef: CHANNEL, mentions: ['peer', 'builder'], body: 'Daily digest', createdBy: SAVED_BY, createdAt: '2026-09-08T02:00:00.000Z',
+          updatedBy: { kind: 'member', memberId: 'member:peer', handle: 'peer' }, updatedAt: '2026-09-08T03:00:00.000Z' },
+        { name: 'operator-digest', origin: 'config', kind: 'post', trigger: 'at', at: '2026-09-09T01:00:00.000Z',
+          channelRef: CHANNEL, body: 'x' },
+      ],
+    })
+    expect(text).toContain(`Routines — 3 scheduled (2 saved here, 1 declared on the operator's config).`)
+    expect(text).toContain('morning-catalog · every 3600s · wake @scout — Check the catalog · saved by @scheduler at 2026-09-08T09:00:00+08:00')
+    expect(text).toContain(`evening-digest · every 86400s, the first fire only · post into ${CHANNEL} as the Human mentioning @peer, @builder · saved by @scheduler at 2026-09-08T10:00:00+08:00 · last changed by @peer`)
+    expect(text).toContain(`operator-digest · once at 2026-09-09T09:00:00+08:00 · post into ${CHANNEL} as the Human with no mention — nobody is notified and no turn starts · declared on the operator's own config — not editable here`)
+    expect(text).toContain("Saving replaces a routine of the same name")
+    // A schedule is configuration, not a ledger fact: the only mention of a
+    // revision is the footer saying neither mutation needs one, and no
+    // next-write token is handed over.
+    expect(text).toContain('Neither needs a revision token')
+    expect(text).not.toContain('baseRevision')
+    expect(text).not.toMatch(/revision[:\s]+\d/u)
+  })
+
+  it('list: an empty schedule states it, and a legacy entry admits its missing attribution', () => {
+    const empty = renderText(teamTools().get('team_routine')!, { action: 'list' }, { kind: 'listed', routines: [] })
+    expect(empty).toContain('Routines — 0 scheduled (0 saved here, 0 declared on the operator\'s config).')
+    expect(empty).toContain('Nothing is scheduled on this Host.')
+
+    const legacy = renderText(teamTools().get('team_routine')!, { action: 'list' }, {
+      kind: 'listed',
+      routines: [{ name: 'old-timer', origin: 'store', kind: 'wake', trigger: 'at', at: '2026-09-09T01:00:00.000Z', member: 'scout', prompt: 'x' }],
+    })
+    expect(legacy).toContain("saved before routines recorded who saved them")
+  })
+
+  it('saved: created vs replaced, with the affected routine first and no restart requirement', () => {
+    const row = { name: 'morning-catalog', origin: 'store', kind: 'wake', trigger: 'everySeconds', everySeconds: 3600,
+      member: 'scout', prompt: 'Check the catalog', createdBy: SAVED_BY, createdAt: '2026-09-08T01:00:00.000Z' }
+    const created = renderText(teamTools().get('team_routine')!, { action: 'save', name: 'morning-catalog' }, {
+      kind: 'saved', name: 'morning-catalog', created: true, routine: row, routines: [row],
+    })
+    expect(created).toContain("Saved — routine 'morning-catalog' created.")
+    expect(created.indexOf('morning-catalog ·')).toBeGreaterThan(created.indexOf("Saved — routine 'morning-catalog' created."))
+    expect(created).toContain('The running Host re-arms the schedule when the store changes; no restart is needed.')
+    expect(created).not.toContain('baseRevision')
+
+    const replaced = renderText(teamTools().get('team_routine')!, { action: 'save', name: 'morning-catalog' }, {
+      kind: 'saved', name: 'morning-catalog', created: false, routine: row, routines: [row],
+    })
+    expect(replaced).toContain("Saved — routine 'morning-catalog' replaced.")
+    expect(replaced).not.toContain('created.')
+  })
+
+  it('deleted: a removal states it will not fire again; a miss names the one routine delete cannot touch', () => {
+    const removed = renderText(teamTools().get('team_routine')!, { action: 'delete', name: 'morning-catalog' }, {
+      kind: 'deleted', name: 'morning-catalog', removed: true, routines: [],
+    })
+    expect(removed).toContain("Deleted — routine 'morning-catalog' removed from the routine store; it will not fire again.")
+
+    const missed = renderText(teamTools().get('team_routine')!, { action: 'delete', name: 'operator-digest' }, {
+      kind: 'deleted', name: 'operator-digest', removed: false, routines: [],
+    })
+    expect(missed).toContain("No stored routine named 'operator-digest' — nothing was removed.")
+    expect(missed).toContain("the operator declared in the profile's own config cannot be deleted here")
+  })
+
+  it('the description states the two kinds, the one-trigger rule, and that mentions are the only notification', () => {
+    const description = teamTools().get('team_routine')!.description
+    expect(description).toContain('Exactly one trigger')
+    expect(description).toContain('a mention is the only thing that notifies anybody or starts a turn')
+    expect(description).toContain("The name is the routine's identity")
+    expect(description).toContain('cannot be saved over or deleted from here')
+    expect(description).toContain('Saving needs no restart')
   })
 })
 

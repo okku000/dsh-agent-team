@@ -35,6 +35,10 @@ import { checkpointRefFor, foldTeamContextProjection } from '../src/context-proj
 import { AGENT_TEAM_PLUGIN_ID, continuationCheckpointRefOf, handoffOf, isCheckpointContinuationMessage, isHandoffMessage } from '../src/context-source.ts'
 import { RECOVERY_DELAY_MS } from '../src/recovery.ts'
 import type { AgentTeamChannelRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
+import { readFileSync } from 'node:fs'
+import { readStoredRoutines, routineStorePath } from '../src/routine-store.ts'
+import * as routines from '../src/routines.ts'
+import { routineFireLogPath, type RoutineFireRecord } from '../src/routines.ts'
 import { MemoryStorageBackend } from './helpers/memory-backend.ts'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -1352,7 +1356,7 @@ describe('Agent Team Member lifecycle', () => {
   })
 
   it('validates the final Team tool marker during unpublished setup', async () => {
-    expect(AGENT_TEAM_TOOL_NAMES).toEqual(['team_inbox', 'team_thread', 'team_message', 'team_claim', 'team_view', 'context_rollover', 'context_checkpoint', 'context_timeline'])
+    expect(AGENT_TEAM_TOOL_NAMES).toEqual(['team_inbox', 'team_thread', 'team_message', 'team_claim', 'team_view', 'team_routine', 'context_rollover', 'context_checkpoint', 'context_timeline'])
     const definition = markAgentTeamPreset({ name: 'team_message' })
     expect(Reflect.get(definition, Symbol.for('@wowyuarm/dsh-agent-team.preset'))).toBe(true)
   })
@@ -4470,3 +4474,85 @@ describe('Agent Team change version domains', () => {
     expect(await staysPending(nextChange(ctx.agentTeam))).toBe(true)
   })
 })
+
+/**
+ * An Agent Member scheduling work for later: the acceptance path of the
+ * GUI-created routines work. The tool is reachable only through the
+ * `team-member` preset, so this needs the real roster — and it is the behaviour
+ * itself: a Member asks for something to happen later, the routine lands in the
+ * store the Web Client writes, the running Host arms it without a restart, it
+ * fires, and the Human's name is on what it committed.
+ */
+describe('an Agent Member schedules a routine', () => {
+  it('saves, lists, deletes, and fires a routine through team_routine, attributed to that Member', async () => {
+    const { ctx, workspaceId, root, workspaces } = await realHarness()
+    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('routine-channel'), workspaceId,
+      name: 'engineering', description: '', memberIds: [] })
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('routine-add'), workspaceId,
+      handle: 'scheduler', description: 'Schedules work', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const call = async (callId: string, args: object) => {
+      const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(callId), name: 'team_routine', arguments: args, agent })
+      if (result.isError) throw new Error(result.error.message)
+      return result.value as Record<string, any>
+    }
+    await mountProducerRow(ctx)
+
+    // "Every morning, post this" — the Member says it, the routine belongs to it.
+    const saved = await call('routine-save', { action: 'save', workspace: workspaceId, name: 'standup', kind: 'post',
+      channelRef: channel.channel.channelRef, body: 'report your progress', mentions: ['scheduler'], everySeconds: 3600 })
+    expect(saved.created).toBe(true)
+    expect(saved.routine).toMatchObject({ name: 'standup', origin: 'store' })
+    expect(saved.routine.createdBy).toMatchObject({ kind: 'member', memberId: added.status.member.memberId, handle: 'scheduler' })
+    expect(readStoredRoutines(routineStorePath())).toMatchObject([{ name: 'standup', body: 'report your progress', createdBy: { handle: 'scheduler' } }])
+
+    const listed = await call('routine-list', { action: 'list', workspace: workspaceId })
+    expect(listed.routines).toMatchObject([{ name: 'standup', kind: 'post', channelRef: channel.channel.channelRef }])
+
+    // A Member schedules only in a Workspace it participates in.
+    const foreign = WorkspaceId('workspace:routine-foreign')
+    workspaces.set(foreign, { id: foreign, path: join(root, 'foreign-project'), attachSession: async () => {} })
+    const refused = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('routine-foreign'),
+      name: 'team_routine', arguments: { action: 'save', workspace: foreign, name: 'elsewhere', member: 'scheduler', prompt: 'check', everySeconds: 60 }, agent })
+    expect(refused.isError).toBe(true)
+    if (!refused.isError) throw new Error('Expected the foreign Workspace to be refused')
+    expect(refused.error.message).toContain('Not participating in Workspace')
+    // The tool resolves the Workspace before it reaches the Host, and the Host
+    // refuses it again on its own: neither layer trusts the other's fence.
+    expect(() => ctx.agentTeam.saveRoutineForAgent(agent, { workspaceId: foreign,
+      routine: { name: 'elsewhere', member: 'scheduler', prompt: 'check', everySeconds: 60 } })).toThrow(/another Workspace/)
+
+    // A one-shot the Member schedules while the row is already running fires
+    // without a restart.
+    await call('routine-save-once', { action: 'save', workspace: workspaceId, name: 'once-report', kind: 'post',
+      channelRef: channel.channel.channelRef, body: 'the nightly build is green', at: new Date(Date.now() + 400).toISOString() })
+    const fired = await waitFor(latestFireRecord, 5000)
+    expect(fired).toMatchObject({ routine: 'once-report', channel: channel.channel.channelRef, outcome: 'posted' })
+
+    const deleted = await call('routine-delete', { action: 'delete', workspace: workspaceId, name: 'standup' })
+    expect(deleted).toMatchObject({ name: 'standup', removed: true })
+    expect(readStoredRoutines(routineStorePath()).map(entry => entry.name)).toEqual(['once-report'])
+
+    // The tool is a Team tool: it belongs to the preset's own roster, which is
+    // why the composition above could run it at all.
+    expect([...AGENT_TEAM_TOOL_NAMES]).toContain('team_routine')
+  })
+})
+
+/** Mount the routine producer row the way the loader does, so its effect is the real one. */
+async function mountProducerRow(ctx: Context): Promise<void> {
+  const loader = Object.create(Loader.prototype) as Loader
+  const plugin = loader.unwrapExports(routines) as Parameters<Context['plugin']>[0]
+  await ctx.plugin(plugin, undefined)
+}
+
+/** The newest fire record the producer has appended, if it has fired yet. */
+function latestFireRecord(): RoutineFireRecord | undefined {
+  try {
+    const lines = readFileSync(routineFireLogPath(), 'utf8').trim().split('\n').filter(line => line !== '')
+    return lines.length === 0 ? undefined : JSON.parse(lines.at(-1)!) as RoutineFireRecord
+  } catch {
+    // No log yet: nothing has fired.
+    return undefined
+  }
+}

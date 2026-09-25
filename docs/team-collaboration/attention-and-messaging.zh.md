@@ -35,6 +35,8 @@ post 以 Human 身份提交进一个新 Thread。凡是 body 里还没写到的 
 
 每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`——投递记通道与 Session id，post 记落地的 Channel 及其提交的 Thread 与 Message，被拒记唤醒的 reason（Host 拒绝 post 时记 `post-failed`），错过的时刻记 `not-armed`——尽力而为：日志不可写时只 warn 而不抛出，超过 256 KiB 后只保留最新 200 行。指令以 `[ROUTINE FIRE] <name>` 为标题，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。
 
+这个 store 并不专属于 operator：Web Client 的 routines 面板与 `team_routine` 工具写的是同一个 store，所以 Human 在对话里交代的那件事，Member 可以直接排进去，不必等 operator 改 profile。每条落库 routine 记下谁在何时保存；而在 `config.routines` 里声明的 entry 报为在那里声明，任何工具都不能覆盖或删除它。
+
 ## 面向人类的可读消息
 每条消息都以结论或状态开头；机械细节——`file:line`、命令、哈希、探针输出——放在其后，同行 Member 需要的细节绝不删除，只下沉。叙述使用 Human 所用的语言，标识符、路径、命令与 ref 保持原文。
 

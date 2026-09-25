@@ -2,6 +2,7 @@ import type { WorkspaceId } from "@deepseek-ai/dsh-workspace"
 import type { SessionId as AgentTeamMemberSessionId, SessionLogOffset as AgentTeamMemberSessionLogOffset, SessionSeq as AgentTeamMemberSessionSeq } from "@deepseek-ai/dsh-session"
 import type {
   AgentTeamActivity,
+  AgentTeamActor,
   AgentTeamAgentMember,
   AgentTeamAgentMemberStatus,
   AgentTeamAttachmentId,
@@ -30,6 +31,7 @@ import type {
   AgentTeamThreadReadFact,
   AgentTeamThreadRef,
 } from "./entities.ts"
+import type { RoutineConfig } from "../routine-schedule.ts"
 
 /** Receipt returned after an operation is durable or an identical retry resolves it. */
 export interface AgentTeamOperationReceipt {
@@ -909,4 +911,64 @@ export interface AgentTeamStatus {
   readonly channelCount: number
   readonly agentMemberCount: number
   readonly humanMemberId: AgentTeamMemberId
+}
+
+/**
+ * One routine this Host schedules, as the routine API reports it.
+ *
+ * The declaration is the same shape an operator writes on the producer row and
+ * the store holds: one definition of a routine, whether it was declared there,
+ * saved from the Web Client, or created by an Agent Member. `origin` says which
+ * source it came from, and only a stored routine carries attribution — a
+ * routine posts as the Human, so "who scheduled this?" has to stay answerable.
+ */
+export interface AgentTeamRoutine {
+  readonly name: string
+  /** `store` — saved through this API; `config` — declared by the operator on the row that arms it. */
+  readonly origin: 'store' | 'config'
+  readonly declaration: RoutineConfig
+  /** Who first saved it through this API, and when; absent on a config declaration. */
+  readonly createdBy?: AgentTeamActor
+  readonly createdAt?: string
+  /** Who last replaced it through this API, and when; absent while only the first save has happened. */
+  readonly updatedBy?: AgentTeamActor
+  readonly updatedAt?: string
+}
+
+/** Read the routines this Host schedules: the store's entries and the operator's declarations. */
+export interface AgentTeamRoutinesRequest {
+  readonly workspaceId: WorkspaceId
+}
+
+/** The whole schedule, in the order the Host arms it. */
+export interface AgentTeamRoutinesResult {
+  readonly routines: readonly AgentTeamRoutine[]
+}
+
+/**
+ * Save one routine. The name is the identity, so this is an upsert and needs no
+ * request id: it is Host configuration, not a ledger operation.
+ */
+export interface AgentTeamSaveRoutineRequest {
+  readonly workspaceId: WorkspaceId
+  readonly routine: RoutineConfig
+}
+
+/** The routine as stored, with the attribution this save recorded or preserved. */
+export interface AgentTeamSaveRoutineResult {
+  readonly routine: AgentTeamRoutine
+  /** False when the save replaced an entry the store already held under that name. */
+  readonly created: boolean
+}
+
+/** Delete one stored routine by name; idempotent, since the name is the identity. */
+export interface AgentTeamDeleteRoutineRequest {
+  readonly workspaceId: WorkspaceId
+  readonly name: string
+}
+
+/** Whether an entry was removed; a name the store does not hold removes nothing. */
+export interface AgentTeamDeleteRoutineResult {
+  readonly name: string
+  readonly removed: boolean
 }

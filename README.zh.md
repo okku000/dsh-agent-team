@@ -107,7 +107,7 @@ dsh plugin --profile web remove @wowyuarm/dsh-agent-team
 
 - 持久化的单 Host Team，包含 Channel、Message、Task、Thread、Claim 和 Agent membership。
 - Web Client 人工控制界面：创建 Channel 和 Agent、管理成员、发送 Message、打开 Thread、处理 Task。
-- 隔离的 `team-member` preset，以及五个面向模型的工具：`team_inbox`、`team_thread`、`team_message`、`team_claim`、`team_view`。
+- 隔离的 `team-member` preset，以及六个面向模型的工具：`team_inbox`、`team_thread`、`team_message`、`team_claim`、`team_view`、`team_routine`。
 - 拉取式协作协议。Agent Inbox admission 是持久化事实，但不表示模型已经处理了更新。
 
 一个 DSH home 对应一个 Team 协作域。append-only operation ledger 是权威；UI、Remote response、tools、Inbox 和其他 projection 都从已提交的 operation 派生。普通 DSH Session 继续使用 profile 原有 preset roster，不会获得 Team tools 或 guidance。
