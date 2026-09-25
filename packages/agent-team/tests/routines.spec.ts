@@ -5,9 +5,10 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeResult } from '../src/member-wake.ts'
+import { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeRequest, type AgentTeamWakeResult } from '../src/member-wake.ts'
+import type { Routine } from '../src/routine-schedule.ts'
 import * as routines from '../src/routines.ts'
-import type { Routine, RoutineFireRecord } from '../src/routines.ts'
+import type { RoutineFireRecord } from '../src/routines.ts'
 import type { AgentTeamMemberId } from '../src/types.ts'
 
 /**
@@ -300,8 +301,11 @@ describe('agent-team routines row', () => {
     process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-routines-row-'))
   }
 
+  /** The one Host method the row calls; `wakeMember` answers synchronously. */
+  type WakeMember = (request: AgentTeamWakeRequest) => AgentTeamWakeResult
+
   /** A Host service stub with only the wake the row calls. */
-  function host(wakeMember: (request: unknown) => AgentTeamWakeResult) {
+  function host(wakeMember: WakeMember) {
     return { wakeMember } as never
   }
 
@@ -341,7 +345,7 @@ describe('agent-team routines row', () => {
 
   it('arms nothing and says so when the row carries no routines', async () => {
     const { ctx, info, warn } = quietContext()
-    const wakeMember = vi.fn()
+    const wakeMember = vi.fn<WakeMember>()
     ctx.provide('agentTeam', host(wakeMember))
     await mount(ctx)
 
@@ -354,7 +358,7 @@ describe('agent-team routines row', () => {
 
   it('wakes the configured target at its instant and records the fire', async () => {
     const { ctx } = quietContext()
-    const wakeMember = vi.fn(() => wakeResult('hourly'))
+    const wakeMember = vi.fn<WakeMember>(() => wakeResult('hourly'))
     ctx.provide('agentTeam', host(wakeMember))
     await mount(ctx, {
       routines: [{ name: 'hourly', member: '@tes', prompt: 'check the model catalog', summary: 'Hourly catalog check', everySeconds: 3600 }],
@@ -370,9 +374,9 @@ describe('agent-team routines row', () => {
       plugin: routines.name,
       summary: 'Hourly catalog check',
     })
-    const request = wakeMember.mock.calls[0]?.[0] as { readonly body: string }
-    expect(request.body.split('\n')[0]).toBe('[ROUTINE FIRE] hourly — fired 2026-09-25T09:00:00+08:00')
-    expect(request.body).toContain('check the model catalog')
+    const request = wakeMember.mock.calls[0]?.[0]
+    expect(request?.body.split('\n')[0]).toBe('[ROUTINE FIRE] hourly — fired 2026-09-25T09:00:00+08:00')
+    expect(request?.body).toContain('check the model catalog')
     expect(fireRecords(logPath)).toEqual([
       expect.objectContaining({ routine: 'hourly', member: 'tes', outcome: 'delivered', mode: 'followup', sessionId: 'session:tes', firedAt: '2026-09-25T01:00:00.000Z' }),
     ])
@@ -381,7 +385,7 @@ describe('agent-team routines row', () => {
 
   it('addresses a branded member id when the routine names one', async () => {
     const { ctx } = quietContext()
-    const wakeMember = vi.fn(() => wakeResult('targeted'))
+    const wakeMember = vi.fn<WakeMember>(() => wakeResult('targeted'))
     ctx.provide('agentTeam', host(wakeMember))
     await mount(ctx, {
       routines: [{ name: 'targeted', member: `member:5b631fa5-cde1-4549-9dbc-2612779b1b84`, prompt: 'go', everySeconds: 60 }],
@@ -409,7 +413,7 @@ describe('agent-team routines row', () => {
 
   it('records and warns about a one-shot whose instant passed while the Host was down', async () => {
     const { ctx, info, warn } = quietContext()
-    const wakeMember = vi.fn()
+    const wakeMember = vi.fn<WakeMember>()
     ctx.provide('agentTeam', host(wakeMember))
     await mount(ctx, { routines: [{ name: 'spent', member: 'tes', prompt: 'go', at: '2026-09-24T00:00:00+08:00' }] })
 
@@ -425,7 +429,7 @@ describe('agent-team routines row', () => {
 
   it('waits for the Host service when the row mounts first, then arms', async () => {
     const { ctx, info } = quietContext()
-    const wakeMember = vi.fn(() => wakeResult('late'))
+    const wakeMember = vi.fn<WakeMember>(() => wakeResult('late'))
     await mount(ctx, { routines: [{ name: 'late', member: 'tes', prompt: 'go', everySeconds: 60 }] })
     expect(info).not.toHaveBeenCalled()
     expect(wakeMember).not.toHaveBeenCalled()
@@ -439,7 +443,7 @@ describe('agent-team routines row', () => {
 
   it('clears its timers when the row unmounts', async () => {
     const { ctx } = quietContext()
-    const wakeMember = vi.fn(() => wakeResult('hourly'))
+    const wakeMember = vi.fn<WakeMember>(() => wakeResult('hourly'))
     ctx.provide('agentTeam', host(wakeMember))
     await mount(ctx, { routines: [{ name: 'hourly', member: 'tes', prompt: 'go', everySeconds: 3600 }] })
 

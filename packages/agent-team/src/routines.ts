@@ -146,8 +146,12 @@ export type RoutineEvent =
 export interface RoutineSchedulerOptions {
   /** The validated routines to run. */
   readonly routines: readonly Routine[]
-  /** Deliver one fire; the Host's refusal arrives as an `AgentTeamWakeDeliveryError`. */
-  readonly wake: (routine: Routine, firedAtMs: number) => Promise<AgentTeamWakeResult>
+  /**
+   * Deliver one fire; the Host's refusal arrives as an `AgentTeamWakeDeliveryError`.
+   * The Host's `wakeMember` answers synchronously, so a producer that awaits
+   * something of its own may pass either a result or a promise of one.
+   */
+  readonly wake: (routine: Routine, firedAtMs: number) => AgentTeamWakeResult | Promise<AgentTeamWakeResult>
   /** One observer for every arming, delivery and refusal. */
   readonly onEvent: (event: RoutineEvent) => void
 }
