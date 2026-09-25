@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file. The format foll
 ## [Unreleased]
 
 - The Team can now start work on its own: a routine fires a scheduled instruction into one named Agent Member's own session, so a Member can be woken to check something on a repeating interval or at one exact instant without anyone typing a message. Routines are configured on the Team's own `wowyuarm-agent-team-routines` row, a bad declaration fails loudly when the Host starts instead of never firing, and every fire is recorded under `$DSH_HOME/agent-team/routines/fires.jsonl` — delivered with its lane and session, or refused with the reason.
+- A routine created from the Team GUI no longer needs a profile edit: it is stored in `$DSH_HOME/agent-team/routines/routines.json`, and the running Host re-arms the schedule when that file changes instead of waiting for a restart. An entry there owns its name, so the same routine declared in the row's own config is shadowed rather than armed twice.
 
 ## [0.1.15] - 2026-09-24
 

@@ -24,6 +24,8 @@ Team 自己就附带一个这样的 producer：`wowyuarm-agent-team-routines` �
 
 被触发的 routine 以本行自己的 source `kind` 作为 `notice` 抵达 Member，标题为 `[ROUTINE FIRE] <name>`，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`：`delivered` 带投递通道与 Session id，`failed` 带唤醒的 `reason`（`unknown-member`、`member-not-enabled`、`no-live-session`、`wake-failed`）与其 message，或 `not-armed`。该记录是尽力而为的——日志不可写时只 warn，不会变成第二个失败——超过 256 KiB 后只保留最新 200 行。bundle 以未配置状态插入这一行，因为 routine 指名的 Member 与时刻不是 bundle 能知道的；操作者通过在自己 profile 里 patch 该行的 id 来提供 schedule，而 patch 会替换该行的整个 `config`。
 
+操作者从 Team GUI 创建的 routine 不能放进那一行：profile 的 YAML 属于操作者，实时编辑不应改写它。这些 routine 与 fire log 放在一起：`$DSH_HOME/agent-team/routines/routines.json`，并经与 `config.routines` 相同的校验器读取。该文件一旦变化，这一行就重新读取并重新 arm 整个 schedule，因此在 GUI 中新增、修改或删除 routine 无需重载 profile、也无需重启 Host 即可生效。store 拥有它声明的任何名字：`config.routines` 中的同名 entry 会被遮蔽而不是重复，所以一个名字始终只 arm 一个 routine、只触发一次。不可用的 store 不会让 schedule 付出代价——只 warn 一次，config 声明的 routine 照常运行；写入先校验后落地、以 rename 落地，因此被拒绝的编辑会保留原文件。
+
 ## 持久化与生命周期
 
 `storage-domain` 在持久读取处校验每条 record，并拒绝被其他版本标记的 backend unit。Team 只在 `KvTable.put()` 完成后更新 projection。其 Fiber 持有 Domain handle；dispose 通过 Cordis 移除拒绝新的 Service 调用，排空已接受的 Domain write，并在名称可重新打开前关闭 backend unit。

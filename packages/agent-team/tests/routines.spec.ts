@@ -6,6 +6,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeRequest, type AgentTeamWakeResult } from '../src/member-wake.ts'
+import { routineStorePath, writeRoutineStore } from '../src/routine-store.ts'
 import type { Routine } from '../src/routine-schedule.ts'
 import * as routines from '../src/routines.ts'
 import type { RoutineFireRecord } from '../src/routines.ts'
@@ -380,6 +381,36 @@ describe('agent-team routines row', () => {
     expect(fireRecords(logPath)).toEqual([
       expect.objectContaining({ routine: 'hourly', member: 'tes', outcome: 'delivered', mode: 'followup', sessionId: 'session:tes', firedAt: '2026-09-25T01:00:00.000Z' }),
     ])
+    await ctx.fiber.dispose()
+  })
+
+  it('arms a routine the store declares, so a GUI-created schedule needs no row edit', async () => {
+    const { ctx } = quietContext()
+    const wakeMember = vi.fn<WakeMember>(() => wakeResult('from-store'))
+    ctx.provide('agentTeam', host(wakeMember))
+    writeRoutineStore(routineStorePath(), [{ name: 'from-store', member: 'tes', prompt: 'check the queue', everySeconds: 60 }])
+    await mount(ctx)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(wakeMember).toHaveBeenCalledTimes(1)
+    expect(fireRecords(routines.routineFireLogPath())).toEqual([
+      expect.objectContaining({ routine: 'from-store', member: 'tes', outcome: 'delivered' }),
+    ])
+    await ctx.fiber.dispose()
+  })
+
+  it('lets the store own a name the row also declares, so one name arms one routine', async () => {
+    const { ctx } = quietContext()
+    const wakeMember = vi.fn<WakeMember>(() => wakeResult('shared'))
+    ctx.provide('agentTeam', host(wakeMember))
+    writeRoutineStore(routineStorePath(), [{ name: 'shared', member: 'tes', prompt: 'store wins', everySeconds: 60 }])
+    await mount(ctx, { routines: [{ name: 'shared', member: 'tes', prompt: 'config loses', everySeconds: 3600 }] })
+
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(wakeMember).toHaveBeenCalledTimes(1)
+    expect(wakeMember.mock.calls[0]?.[0]).toMatchObject({ body: expect.stringContaining('store wins') })
     await ctx.fiber.dispose()
   })
 

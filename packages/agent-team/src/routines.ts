@@ -34,7 +34,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeResult } from './member-wake.ts'
-import { isRepeatingRoutine, nextRoutineOccurrence, normalizeRoutines, routineBody, routineSummary, routineTarget, type Routine, type RoutineConfig } from './routine-schedule.ts'
+import { mergeRoutines, readRoutineStore, routineStorePath, watchRoutineStore } from './routine-store.ts'
+import { isRepeatingRoutine, nextRoutineOccurrence, routineBody, routineSummary, routineTarget, type Routine, type RoutineConfig } from './routine-schedule.ts'
 
 /** Cordis row name; also the source kind every fire carries into the Member's log. */
 export const name = 'wowyuarm-agent-team-routines'
@@ -248,22 +249,26 @@ export class RoutineScheduler {
 /**
  * Mount the routine row: validate the schedule, then arm it.
  *
- * The schedule is read once, at mount. A profile edit therefore reaches a
- * running Host as a row reload — dispose, re-validate, re-arm — which is the
- * behaviour a changed instant wants anyway.
+ * Two sources feed one schedule. The row's `config.routines` is the operator's
+ * declaration and is read exactly once — a profile edit reaches a running Host
+ * as a row reload, as it always did. The store beside the fire log is the live
+ * set an operator edits from the GUI, so it is re-read whenever it changes and
+ * the whole schedule is armed again from the merged list: a routine added,
+ * edited, or removed in the GUI takes effect without restarting the Host.
  * @param ctx - Cordis context carrying the Team Host service.
  * @param config - the row's configuration.
  */
 export function apply(ctx: Context, config: Config): void {
-  const routines = normalizeRoutines(config?.routines)
-  if (routines.length === 0) {
-    ctx.logger.info('agent-team routines: no routines configured')
-    return
-  }
-  const appendFire = createRoutineFireLog(routineFireLogPath(), message => ctx.logger.warn(message))
+  const warn = (message: string): void => ctx.logger.warn(message)
+  const storePath = routineStorePath()
+  // Read before the effect: a declaration the Host cannot run has to fail the
+  // row loudly at mount, exactly as it did before the store existed.
+  const declared = mergeRoutines(readRoutineStore(storePath, warn), config?.routines)
+  const appendFire = createRoutineFireLog(routineFireLogPath(), warn)
   const recordedAt = (): string => new Date().toISOString()
+  let scheduler: RoutineScheduler | undefined
 
-  const scheduler = new RoutineScheduler({
+  const buildScheduler = (routines: readonly Routine[]): RoutineScheduler => new RoutineScheduler({
     routines,
     wake: (routine, firedAt) => ctx.agentTeam.wakeMember({
       ...routineTarget(routine.member),
@@ -311,8 +316,40 @@ export function apply(ctx: Context, config: Config): void {
     },
   })
 
-  ctx.effect(() => {
+  /** Arm the current merged list, replacing whatever the previous one armed. */
+  const rearm = (): void => {
+    scheduler?.dispose()
+    scheduler = undefined
+    let routines: readonly Routine[]
+    try {
+      routines = mergeRoutines(readRoutineStore(storePath, warn), config?.routines)
+    } catch (error) {
+      // The operator's own declaration cannot change without a row reload, so a
+      // throw here is unreachable from a GUI edit; guarding anyway keeps a live
+      // Host from dying inside a watcher callback.
+      warn(`agent-team routines: the schedule could not be reloaded (${error instanceof Error ? error.message : String(error)}); the previous schedule stays armed`)
+      return
+    }
+    if (routines.length === 0) {
+      ctx.logger.info('agent-team routines: no routines configured')
+      return
+    }
+    scheduler = buildScheduler(routines)
     scheduler.armAll()
-    return () => scheduler.dispose()
+  }
+
+  ctx.effect(() => {
+    const unsubscribe = watchRoutineStore(storePath, () => { rearm() }, warn)
+    if (declared.length === 0) {
+      ctx.logger.info('agent-team routines: no routines configured')
+    } else {
+      scheduler = buildScheduler(declared)
+      scheduler.armAll()
+    }
+    return () => {
+      unsubscribe()
+      scheduler?.dispose()
+      scheduler = undefined
+    }
   }, 'agent-team.routines.timers')
 }
