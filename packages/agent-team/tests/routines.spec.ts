@@ -4,57 +4,33 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { Storage } from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeRequest, type AgentTeamWakeResult } from '../src/member-wake.ts'
 import { routineStorePath, writeRoutineStore } from '../src/routine-store.ts'
-import type { PostAction, PostRoutine, Routine, RoutineConfig, WakeRoutine } from '../src/routine-schedule.ts'
+import type { Routine, RoutineConfig } from '../src/routine-schedule.ts'
 import * as routines from '../src/routines.ts'
-import type { RoutineFireRecord, RoutinePostResult } from '../src/routines.ts'
-import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import type {
-  AgentTeamChannelRef, AgentTeamMemberId, AgentTeamMessageRef, AgentTeamOperationId, AgentTeamRequestId,
-  AgentTeamSendMessageRequest, AgentTeamSendMessageResult, AgentTeamThreadRef,
-} from '../src/types.ts'
+import type { RoutineFireRecord } from '../src/routines.ts'
+import type { AgentTeamMemberId } from '../src/types.ts'
 
 /**
  * The built-in routine producer: the schedule's timers, the fire log, and the
- * row that wires them to the Host's wake and to its Message commit. The
- * arithmetic itself is covered by `routine-schedule.spec.ts`; what matters here
- * is what an unattended fire leaves behind — the armed instant, the phase after
- * a slow delivery, the record of a refusal, and a log that cannot break the Host.
+ * row that wires them to the Host's wake. The arithmetic itself is covered by
+ * `routine-schedule.spec.ts`; what matters here is what an unattended fire
+ * leaves behind — the armed instant, the phase after a slow delivery, the
+ * record of a refusal, and a log that cannot break the Host.
  */
 
 const T = Date.parse('2026-09-25T00:00:00.000Z')
 const MEMBER_ID = 'member:tes' as AgentTeamMemberId
-const SENDER_ID = 'member:human' as AgentTeamMemberId
-const WORKSPACE_ID = 'workspace:6f0d0f7c-4f4b-4a5e-8a1e-1f2b3c4d5e6f' as WorkspaceId
-const CHANNEL_REF = 'channel:2b8c9d0e-1a2b-4c3d-9e4f-5a6b7c8d9e0f' as AgentTeamChannelRef
-const THREAD_REF = 'thread:1c2d3e4f-0000-4000-8000-000000000001' as AgentTeamThreadRef
-const MESSAGE_REF = 'message:1c2d3e4f-0000-4000-8000-000000000002' as AgentTeamMessageRef
 
-/** A validated repeating wake routine, so the timers can be driven without the config layer. */
-function repeating(name: string, everySeconds: number, overrides: Partial<WakeRoutine> = {}): WakeRoutine {
-  return { name, action: { kind: 'wake', member: 'tes', prompt: 'check the model catalog' }, once: false, everySeconds, ...overrides }
+/** A validated repeating routine, so the timers can be driven without the config layer. */
+function repeating(name: string, everySeconds: number, overrides: Partial<Routine> = {}): Routine {
+  return { name, member: 'tes', prompt: 'check the model catalog', once: false, everySeconds, ...overrides }
 }
 
-/** A validated one-shot wake routine. */
-function oneShot(name: string, at: number): WakeRoutine {
-  return { name, action: { kind: 'wake', member: 'tes', prompt: 'check the model catalog' }, once: false, at }
-}
-
-/** A validated post action, so the post lane can be driven without the config layer. */
-function postAction(overrides: Partial<PostAction> = {}): PostAction {
-  return { kind: 'post', workspaceId: WORKSPACE_ID, channel: CHANNEL_REF, mentions: [], body: 'report your progress', asTask: false, ...overrides }
-}
-
-/** A validated repeating post routine. */
-function posting(name: string, everySeconds: number, overrides: Partial<PostAction> = {}): PostRoutine {
-  return { name, action: postAction(overrides), once: false, everySeconds }
+/** A validated one-shot routine. */
+function oneShot(name: string, at: number): Routine {
+  return { name, member: 'tes', prompt: 'check the model catalog', once: false, at }
 }
 
 function wakeResult(routineName: string, mode: AgentTeamWakeMode = 'followup'): AgentTeamWakeResult {
@@ -76,8 +52,7 @@ interface Fired {
 
 /**
  * One scheduler with its events and wake deliveries recorded, so a test states
- * only what it drives. The wake lane is the one nearly every test drives; a post
- * routine goes through {@link postSchedulerOf}.
+ * only what it drives.
  */
 function schedulerOf(
   routinesToRun: readonly Routine[],
@@ -89,25 +64,11 @@ function schedulerOf(
     routines: routinesToRun,
     deliver: async (routine, firedAt) => {
       calls.push({ routine, firedAt })
-      return { action: 'wake', result: await wake(routine, firedAt) }
+      return wake(routine, firedAt)
     },
     onEvent: event => { events.push(event) },
   })
   return { scheduler, events, calls }
-}
-
-/** One scheduler delivering every fire through the post lane. */
-function postSchedulerOf(
-  routinesToRun: readonly Routine[],
-  post: (routine: Routine, firedAt: number) => Promise<RoutinePostResult>,
-) {
-  const events: routines.RoutineEvent[] = []
-  const scheduler = new routines.RoutineScheduler({
-    routines: routinesToRun,
-    deliver: async (routine, firedAt) => ({ action: 'post', result: await post(routine, firedAt) }),
-    onEvent: event => { events.push(event) },
-  })
-  return { scheduler, events }
 }
 
 describe('RoutineScheduler', () => {
@@ -249,30 +210,6 @@ describe('RoutineScheduler', () => {
     expect(events.map(event => event.outcome)).toEqual(['armed', 'armed'])
   })
 
-  it('reports a post fire as posted, carrying the Thread and Message it committed', async () => {
-    const standup = posting('standup', 60)
-    const committed: RoutinePostResult = { channelRef: CHANNEL_REF, threadRef: THREAD_REF, messageRef: MESSAGE_REF }
-    const { scheduler, events } = postSchedulerOf([standup], async () => committed)
-
-    scheduler.armAll()
-    await vi.advanceTimersByTimeAsync(60_000)
-
-    expect(events).toEqual([
-      { outcome: 'armed', routine: standup, next: T + 60_000 },
-      { outcome: 'posted', routine: standup, firedAt: T + 60_000, result: committed },
-      { outcome: 'armed', routine: standup, next: T + 120_000 },
-    ])
-  })
-
-  it('names a post refusal after the lane that failed, not after the wake it is not', async () => {
-    const standup = posting('standup', 60)
-    const { scheduler, events } = postSchedulerOf([standup], async () => { throw new Error('Channel is archived') })
-
-    await expect(scheduler.fire(standup)).resolves.toBeUndefined()
-
-    expect(events[0]).toEqual({ outcome: 'failed', routine: standup, firedAt: T, reason: 'post-failed', detail: 'Channel is archived' })
-  })
-
   it('runs two routines on their own grids', async () => {
     const everyMinute = repeating('every-minute', 60)
     const everyTwo = repeating('every-two', 120)
@@ -320,13 +257,11 @@ describe('routine fire log', () => {
     const appendFire = routines.createRoutineFireLog(path, warn)
 
     appendFire({ routine: 'hourly', member: 'tes', outcome: 'delivered', mode: 'followup', sessionId: SessionId('session:tes'), firedAt: '2026-09-25T00:00:00.000Z', recordedAt: '2026-09-25T00:00:01.000Z' })
-    appendFire({ routine: 'standup', channel: CHANNEL_REF, outcome: 'posted', threadRef: THREAD_REF, messageRef: MESSAGE_REF, firedAt: '2026-09-25T00:00:00.000Z', recordedAt: '2026-09-25T00:00:01.000Z' })
     appendFire({ routine: 'nightly', member: 'tes', outcome: 'failed', reason: 'member-not-enabled', detail: 'suspended', firedAt: '2026-09-25T00:00:00.000Z', recordedAt: '2026-09-25T00:00:01.000Z' })
 
     expect(warn).not.toHaveBeenCalled()
     expect(records(path)).toEqual([
       { routine: 'hourly', member: 'tes', outcome: 'delivered', mode: 'followup', sessionId: 'session:tes', firedAt: '2026-09-25T00:00:00.000Z', recordedAt: '2026-09-25T00:00:01.000Z' },
-      { routine: 'standup', channel: CHANNEL_REF, outcome: 'posted', threadRef: THREAD_REF, messageRef: MESSAGE_REF, firedAt: '2026-09-25T00:00:00.000Z', recordedAt: '2026-09-25T00:00:01.000Z' },
       { routine: 'nightly', member: 'tes', outcome: 'failed', reason: 'member-not-enabled', detail: 'suspended', firedAt: '2026-09-25T00:00:00.000Z', recordedAt: '2026-09-25T00:00:01.000Z' },
     ])
   })
@@ -370,30 +305,13 @@ describe('agent-team routines row', () => {
     process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-routines-row-'))
   }
 
-  /** The two Host methods the row calls; `wakeMember` answers synchronously. */
+  /** The Host methods the row calls; `wakeMember` answers synchronously. */
   type WakeMember = (request: AgentTeamWakeRequest) => AgentTeamWakeResult
-  type SendMessage = (request: AgentTeamSendMessageRequest) => Promise<AgentTeamSendMessageResult>
 
-  /** What the Host reports for a committed top-level post. */
-  function postedResult(request: AgentTeamSendMessageRequest): AgentTeamSendMessageResult {
-    const occurredAt = new Date(T).toISOString()
-    return {
-      kind: 'committed',
-      receipt: { operationId: 'operation:routine' as AgentTeamOperationId, requestId: request.requestId, sequence: 4, occurredAt },
-      message: {
-        messageRef: MESSAGE_REF, channelRef: CHANNEL_REF, threadRef: THREAD_REF, sender: SENDER_ID,
-        body: request.body, topLevel: true, sequence: 4, occurredAt,
-      },
-      thread: { threadRef: THREAD_REF, revision: 4 },
-      attention: [],
-      directMarkers: [],
-    }
-  }
-
-  /** A Host service stub carrying the wake, the post, and the declaration hook the row calls. */
-  function host(wakeMember: WakeMember, sendMessage: SendMessage = async () => { throw new Error('this Host cannot post') },
+  /** A Host service stub carrying the wake and the declaration hook the row calls. */
+  function host(wakeMember: WakeMember,
     declareRoutines: (source: string, declarations: readonly RoutineConfig[]) => () => void = () => () => {}) {
-    return { wakeMember, sendMessage, declareRoutines } as never
+    return { wakeMember, declareRoutines } as never
   }
 
   /** Mount the row the way the loader does, so its `inject` and `effect` are the real ones. */
@@ -486,49 +404,6 @@ describe('agent-team routines row', () => {
     await ctx.fiber.dispose()
   })
 
-  it('posts a routine into its Channel, mentioning the Member its body has to wake', async () => {
-    const { ctx } = quietContext()
-    const wakeMember = vi.fn<WakeMember>()
-    const sendMessage = vi.fn<SendMessage>(async request => postedResult(request))
-    ctx.provide('agentTeam', host(wakeMember, sendMessage))
-    writeRoutineStore(routineStorePath(), [{
-      name: 'standup', kind: 'post', workspaceId: WORKSPACE_ID, channel: CHANNEL_REF,
-      mentions: ['tes'], body: 'report your progress', everySeconds: 60,
-    }])
-    await mount(ctx)
-
-    await vi.advanceTimersByTimeAsync(60_000)
-
-    expect(wakeMember).not.toHaveBeenCalled()
-    expect(sendMessage).toHaveBeenCalledTimes(1)
-    const request = sendMessage.mock.calls[0]?.[0]
-    // The mention is what wakes the Member, so it has to be in the body the
-    // ledger scans — the row never passes a recipient list of its own.
-    expect(request).toMatchObject({ workspaceId: WORKSPACE_ID, channelRef: CHANNEL_REF, body: '@tes report your progress', asTask: false })
-    expect(request?.requestId).toBe(`routine:standup:${T + 60_000}`)
-    expect(fireRecords(routines.routineFireLogPath())).toEqual([
-      expect.objectContaining({ routine: 'standup', channel: CHANNEL_REF, outcome: 'posted', threadRef: THREAD_REF, messageRef: MESSAGE_REF }),
-    ])
-    await ctx.fiber.dispose()
-  })
-
-  it('records a post the Host refuses as failed, naming the Channel it posted to', async () => {
-    const { ctx, warn } = quietContext()
-    const sendMessage = vi.fn<SendMessage>(async () => { throw new Error(`Agent Member '${MEMBER_ID}' is not authorized for Channel '${CHANNEL_REF}'`) })
-    ctx.provide('agentTeam', host(vi.fn<WakeMember>(), sendMessage))
-    await mount(ctx, {
-      routines: [{ name: 'standup', kind: 'post', workspaceId: WORKSPACE_ID, channel: CHANNEL_REF, body: 'report your progress', everySeconds: 60 }],
-    })
-
-    await vi.advanceTimersByTimeAsync(60_000)
-
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("'standup' not delivered (post-failed)"))
-    expect(fireRecords(routines.routineFireLogPath())).toEqual([
-      expect.objectContaining({ routine: 'standup', channel: CHANNEL_REF, outcome: 'failed', reason: 'post-failed' }),
-    ])
-    await ctx.fiber.dispose()
-  })
-
   it('lets the store own a name the row also declares, so one name arms one routine', async () => {
     const { ctx } = quietContext()
     const wakeMember = vi.fn<WakeMember>(() => wakeResult('shared'))
@@ -617,7 +492,7 @@ describe('agent-team routines row', () => {
     const { ctx } = quietContext()
     const published: Array<{ source: string; declarations: readonly RoutineConfig[] }> = []
     const withdraw = vi.fn()
-    ctx.provide('agentTeam', host(vi.fn<WakeMember>(), undefined, (source, declarations) => {
+    ctx.provide('agentTeam', host(vi.fn<WakeMember>(), (source, declarations) => {
       published.push({ source, declarations })
       return withdraw
     }))
@@ -640,90 +515,5 @@ describe('agent-team routines row', () => {
     ctx.provide('agentTeam', host(() => wakeResult('bad')))
     await expect(mount(ctx, { routines: [{ name: 'bad name', member: 'tes', prompt: 'go', everySeconds: 60 }] })).rejects.toThrow(/\.name must match/)
     await ctx.fiber.dispose()
-  })
-})
-
-/**
- * The post lane against a real Team Host: a stub proves the request the row
- * builds, but only the ledger can prove that request is one the Host accepts —
- * that a taskless Thread is created, that the Human is the sender, and that the
- * committed refs are what the fire log records.
- */
-describe('a posted routine over a real Team Host', () => {
-  const originalDshHome = process.env.DSH_HOME
-  const alpha = WorkspaceId('workspace:alpha')
-  const cleanups: Array<() => Promise<void>> = []
-
-  /** A Host over a throwaway storage backend, with one Workspace and no Agent Members. */
-  async function harness(): Promise<Context> {
-    const ctx = new Context()
-    await ctx.plugin(Storage)
-    ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-    const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-    ctx.storage.mount('domain', facility)
-    ctx.provide('storageDomain', facility)
-    ctx.provide('workspaceRegistry', {
-      get: (id: WorkspaceId) => id === alpha ? { id, path: process.cwd(), attachSession: async () => {}, archiveSession: async () => {} } : undefined,
-      list: () => [{ id: alpha, path: process.cwd() }],
-      archiveSession: async () => {},
-    })
-    ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-    ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-    ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-    ctx.provide('tools', { schemas: () => [] })
-    ctx.provide('sessionPersistence', { list: async () => [] })
-    await ctx.plugin(SessionProjectionRegistry)
-    const team = await ctx.plugin(AgentTeam)
-    cleanups.push(async () => { await team.dispose(); await facility.closeAll() })
-    return ctx
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(T)
-    process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-routines-live-'))
-  })
-
-  afterEach(async () => {
-    await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-    vi.useRealTimers()
-    if (originalDshHome === undefined) delete process.env.DSH_HOME
-    else process.env.DSH_HOME = originalDshHome
-  })
-
-  /** Mount the row the way the loader does, so its `inject` and `effect` are the real ones. */
-  async function mount(ctx: Context, config?: routines.Config): Promise<void> {
-    const loader = Object.create(Loader.prototype) as Loader
-    const plugin = loader.unwrapExports(routines) as Parameters<Context['plugin']>[0]
-    await ctx.plugin(plugin, config)
-  }
-
-  it('commits a taskless Message as the Human and records the refs it landed on', async () => {
-    const ctx = await harness()
-    const team = ctx.agentTeam
-    const created = await team.createChannel({ requestId: 'post-channel' as AgentTeamRequestId, workspaceId: alpha, name: 'engineering', description: '' })
-    const channelRef = created.channel.channelRef
-    writeRoutineStore(routineStorePath(), [{
-      name: 'standup', kind: 'post', workspaceId: alpha, channel: channelRef,
-      body: 'the nightly build is green', everySeconds: 60,
-    }])
-    await mount(ctx, undefined)
-
-    await vi.advanceTimersByTimeAsync(60_000)
-    // The commit runs through the ledger's own queue, so let it settle.
-    await vi.advanceTimersByTimeAsync(0)
-
-    const [record] = readFileSync(routines.routineFireLogPath(), 'utf8').trim().split('\n').map(line => JSON.parse(line) as RoutineFireRecord)
-    expect(record).toMatchObject({ routine: 'standup', channel: channelRef, outcome: 'posted' })
-    if (record?.outcome !== 'posted') throw new Error(`expected a posted record, received '${record?.outcome}'`)
-
-    const read = await team.readThread({ requestId: 'read-posted' as AgentTeamRequestId, workspaceId: alpha, threadRef: record.threadRef as AgentTeamThreadRef })
-    // A routine posts as the Human who created it, into a Thread of its own.
-    expect(read.anchor).toMatchObject({
-      sender: AGENT_TEAM_HUMAN_MEMBER_ID,
-      body: 'the nightly build is green',
-      topLevel: true,
-    })
-    expect(read.thread.taskRef).toBeUndefined()
   })
 })

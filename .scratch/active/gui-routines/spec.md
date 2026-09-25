@@ -1,7 +1,16 @@
 # Routines created from the Team GUI — confirmed scope
 
-Written 2026-09-25, updated the same day after the Human redirected the UI shape and asked for agent-created
-routines. This is the decision snapshot; where it and `packages/` disagree, the code wins.
+Written 2026-09-25, updated twice the same day: first after the Human redirected the UI shape and asked for
+agent-created routines, then after they narrowed the feature to waking a Member. This is the decision snapshot;
+where it and `packages/` disagree, the code wins.
+
+## Withdrawn later the same day: the `post` action
+
+The Human chose one lane — 「各エージェントをwakeするやり方一本で行こうと思う」 — so the `post` action described in the
+withdrawn bullets below was removed from the engine, the store contract, the `team_routine` tool, and the docs. A
+routine now wakes one named Member and does nothing else. Everything about UI placement, creator attribution, and
+the trigger survives; the sections that argued for posting as the Human are kept as the reasoning of a decision that
+was made and then withdrawn. Nothing was lost in the real environment, which held no stored routine.
 
 ## Scope, as the Human confirmed it
 
@@ -9,13 +18,14 @@ routines. This is the decision snapshot; where it and `packages/` disagree, the 
   through a tool** — the Human's own words: they want a global cron viewer that is also where crons are created,
   they want each agent to be able to create one, and the payoff they named is *creating crons conversationally*
   ("毎朝9時にこれを投稿して" said to an agent, which then schedules it).
-- Its action is **post**: one Message into one Channel, chosen per routine at creation time.
-- The Message is committed **as the Human**. A routine belongs to the Human who created it, and the Human stays
-  answerable for what it says.
-- The body is posted **verbatim**, with no engine-added marker saying a machine sent it. What wakes a Member is a
-  body `@mention`, rendered by the engine only where the declared body does not already carry the handle.
-- `wake` stays in the engine and stays reachable: an operator's `config.routines` may declare it, and it is the
-  natural action for an *agent-created* routine ("every morning, check the catalog"). It is not the GUI's default.
+- Its one action is **wake**: the routine names one Member and one instruction, and the instruction is injected into
+  that Member's own Session. The Member then decides what to do — including saying something in a Channel, if that
+  is what the instruction asks for.
+- ~~Its action is **post**: one Message into one Channel, chosen per routine at creation time.~~ Withdrawn with the
+  `post` action, together with its body-verbatim, posted-as-the-Human, and mention-delivery rules.
+- `wake` is now the engine's only lane, and it is what the GUI creates as well as what an operator's
+  `config.routines` may declare. It is the natural action for an *agent-created* routine ("every morning, check the
+  catalog") precisely because no ledger artifact and no impersonation are involved.
 - The schedule is one trigger: `everySeconds` (integer ≥ 60, phased from `anchorAt`) or one absolute RFC 3339 `at`.
 
 ## UI placement — resolved
@@ -30,43 +40,42 @@ so it needs no new slot, no new rail entry, and no profile patch — which is al
 
 ## Agent-created routines: the authority decision to be explicit about
 
-Any Agent Member can create a routine, and a routine posts **as the Human**. That is the Human's explicit choice,
-but it means an agent can make the Team speak in the Human's name on a schedule. The design therefore records the
-creator on every stored routine (who saved it, and when) and shows it, so the Human can always answer "who
-scheduled this?" and delete it. Nothing blocks an agent from creating one.
+Any Agent Member can create a routine. As long as the action was `post`, that meant an agent could make the Team
+speak in the Human's name on a schedule; with the wake-only redirect the reachable risk is smaller but real — an
+agent can make another Member start a turn on a schedule, spending its context unattended. The design therefore
+records the creator on every stored routine (who saved it, and when) and shows it, so the Human can always answer
+"who scheduled this?" and delete it. Nothing blocks an agent from creating one.
 
-## Naming
+## Why a wake is the delivery mechanism
 
-The Human says "cron"; the code, docs, fire log, store file, and config key all say **routine**, and the engine has
-no cron expression syntax. Renaming is a large churn across a shipped public contract, so the naming stays
-`routine` for now; the UI wording is a separate, cheap decision still open.
+A wake needs no Channel, no mention, and no new Thread: it reaches any activated Member with a live Session,
+including one that shares no Channel with the producer. It also leaves no ledger artifact — what arrives is context
+that Member reads, framed as unattended — so a routine cannot quietly author Team facts, and a refusal is a
+structured reason in the fire log rather than a Message nobody received.
 
-## Why a mention is the delivery mechanism
+## Reconnaissance: mentions, Inbox, and followers
 
-A Channel member who is not mentioned and does not already follow the Thread is not notified and does not find the
-Message in their Inbox: Inbox candidates come only from attention, direct, and activity markers, and reading a
-Thread does not start a follow. So a mention of exactly one Member on a **newly created taskless Thread** notifies
-exactly that Member — which makes per-Member Channels unnecessary, and makes `mention ≈ wake` for the Human's
-purpose.
-
-Two consequences shaped the design:
+Still true of the Team, and still relevant if a routine ever grows a way to say something: a Channel member who is
+not mentioned and does not already follow the Thread is not notified and does not find the Message in their Inbox,
+because Inbox candidates come only from attention, direct, and activity markers, and reading a Thread does not start
+a follow. Two consequences shaped the withdrawn design and would shape a future one:
 
 - Replying into an **existing** Thread notifies all of its followers, and mentioning a non-follower there needs a
-  Human confirmation token. So a fire always opens a **new** Thread.
+  Human confirmation token. So a Message a routine commits always opens a **new** Thread.
 - A mention the Host cannot deliver is refused (the mentioned Member must be an active Channel member). That
-  refusal is a recorded fire outcome, not a silent no-op.
+  refusal would have to be a recorded fire outcome, not a silent no-op.
 
-## Why posting as the Human rather than waking
+## Why the action was `post` rather than a wake — withdrawn
 
-`wake` remains the engine's other lane and keeps properties a post cannot have: no ledger artifact, explicit
-unattended framing, structured refusal reasons in the fire log, targeting without Channel membership, and no
-`From: human` impersonation.
+This was the withdrawn case: `post` reached a Human-visible Thread and could notify several Members at once, which a
+wake cannot do. It bought that at the price of impersonating the Human on the ledger and of needing a Channel and a
+deliverable mention, so a fire could fail for reasons outside the routine's own declaration. The Human's redirect
+traded the reach for the simpler contract.
 
 ## Settled implementation questions
 
-- Committing a Message needs a `workspaceId` as well as a Channel ref, so a post action carries **both** the branded
-  `workspace:<uuid>` and `channel:<uuid>`, filled by whoever creates the routine. No Channel-name resolution helper:
-  that would be a second authority on ref syntax.
+- No Channel-name resolution helper, and no per-routine `workspaceId` in the declaration: with `post` gone nothing
+  in a routine names a Workspace, and the saving call's own Workspace is used only to authorize the Member.
 - Routine operations need **no `requestId`**: the routine *name* is the identity, so saving is an upsert and
   deleting is idempotent by construction. They are Host configuration, not ledger operations, so they cannot use
   the ledger's request-id dedupe anyway.

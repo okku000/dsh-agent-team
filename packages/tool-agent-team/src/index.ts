@@ -620,7 +620,6 @@ interface RoutineAuthorView {
 interface RoutineRow {
   readonly name: string
   readonly origin: string
-  readonly kind: string
   readonly trigger: string
   readonly everySeconds?: number
   readonly at?: string
@@ -629,10 +628,6 @@ interface RoutineRow {
   readonly member?: string
   readonly prompt?: string
   readonly summary?: string
-  readonly channelRef?: string
-  readonly mentions?: string[]
-  readonly body?: string
-  readonly asTask?: boolean
   readonly createdBy?: RoutineAuthorView
   readonly createdAt?: string
   readonly updatedBy?: RoutineAuthorView
@@ -645,7 +640,6 @@ function routineRow(routine: AgentTeamRoutine): RoutineRow {
   return {
     name: routine.name,
     origin: routine.origin,
-    kind: declaration.kind === 'post' ? 'post' : 'wake',
     trigger: declaration.everySeconds === undefined ? 'at' : 'everySeconds',
     ...(declaration.everySeconds === undefined ? {} : { everySeconds: declaration.everySeconds }),
     ...(declaration.at === undefined ? {} : { at: declaration.at }),
@@ -654,10 +648,6 @@ function routineRow(routine: AgentTeamRoutine): RoutineRow {
     ...(declaration.member === undefined ? {} : { member: declaration.member }),
     ...(declaration.prompt === undefined ? {} : { prompt: declaration.prompt }),
     ...(declaration.summary === undefined ? {} : { summary: declaration.summary }),
-    ...(declaration.channel === undefined ? {} : { channelRef: declaration.channel }),
-    ...(declaration.mentions === undefined ? {} : { mentions: [...declaration.mentions] }),
-    ...(declaration.body === undefined ? {} : { body: declaration.body }),
-    ...(declaration.asTask === undefined ? {} : { asTask: declaration.asTask }),
     ...(routine.createdBy === undefined ? {} : { createdBy: routine.createdBy }),
     ...(routine.createdAt === undefined ? {} : { createdAt: routine.createdAt }),
     ...(routine.updatedBy === undefined ? {} : { updatedBy: routine.updatedBy }),
@@ -665,13 +655,9 @@ function routineRow(routine: AgentTeamRoutine): RoutineRow {
   }
 }
 
-/** One routine line: what it does, when it fires, and who put it there. */
+/** One routine line: whom it wakes, when it fires, and who put it there. */
 function routineLine(row: RoutineRow): string {
-  const target = row.kind === 'post'
-    ? `post into ${row.channelRef} as the Human${row.mentions === undefined || row.mentions.length === 0
-      ? ' with no mention — nobody is notified and no turn starts'
-      : ` mentioning ${row.mentions.map(handle => `@${handle}`).join(', ')}`}`
-    : `wake @${row.member} — ${boundedSubject(row.prompt ?? '')}`
+  const target = `wake @${row.member} — ${boundedSubject(row.prompt ?? '')}`
   const trigger = row.everySeconds === undefined
     ? `once${row.at === undefined ? '' : ` at ${formatTeamTimestamp(row.at)}`}`
     : `every ${row.everySeconds}s${row.once === true ? ', the first fire only' : ''}`
@@ -694,7 +680,6 @@ const ROUTINE_AUTHOR_SCHEMA = {
 const ROUTINE_ROW_SCHEMA = {
   name: { type: 'string', required: true },
   origin: { type: 'string', required: true },
-  kind: { type: 'string', required: true },
   trigger: { type: 'string', required: true },
   everySeconds: { type: 'number' },
   at: { type: 'string' },
@@ -703,10 +688,6 @@ const ROUTINE_ROW_SCHEMA = {
   member: { type: 'string' },
   prompt: { type: 'string' },
   summary: { type: 'string' },
-  channelRef: { type: 'string' },
-  mentions: { type: 'array', items: { type: 'string' } },
-  body: { type: 'string' },
-  asTask: { type: 'boolean' },
   createdBy: { type: 'object', additionalProperties: false, properties: ROUTINE_AUTHOR_SCHEMA },
   createdAt: { type: 'string' },
   updatedBy: { type: 'object', additionalProperties: false, properties: ROUTINE_AUTHOR_SCHEMA },
@@ -723,11 +704,10 @@ function rejectExtraArguments(args: Record<string, unknown>, allowed: readonly s
 
 const teamRoutine = defineTool({
   name: 'team_routine',
-  description: 'List, save, or delete a Team routine: work this Host fires on its own later, when nobody is talking any more. A routine does exactly one thing. kind \'wake\' (the default) injects your instruction into one named Agent Member\'s own session — the answer to "every morning, go check the catalog". kind \'post\' commits one Message into a Channel as the Human, verbatim, with no marker saying a machine sent it, so a Member creating one is speaking in the Human\'s name; name every Member who must act with mentions, because a mention is the only thing that notifies anybody or starts a turn — Channel membership alone notifies nobody. Exactly one trigger: everySeconds (an integer of at least 60, aligned to anchorAt when given) or one absolute RFC 3339 at instant. The name is the routine\'s identity: save upserts it and delete removes it, and neither needs a revision token. The schedule belongs to the Host rather than to your Session: it survives restarts, it fires unattended, and it is listed with who saved it and when. A routine the operator declared in the profile\'s own config is listed as origin \'config\' and cannot be saved over or deleted from here — ask the Human to patch that row. Saving needs no restart: the running Host arms the change as soon as the store changes. A declaration the Host cannot run is refused whole with the reason, and the routines that already run stay as they were.',
+  description: 'List, save, or delete a Team routine: work this Host starts on its own later, when nobody is talking any more. A routine does exactly one thing — it wakes one named Agent Member by injecting your instruction into that Member\'s own session, which is the answer to "every morning, go check the catalog". The Member then acts with its own identity and judgement; a routine commits nothing to the Team itself. Exactly one trigger: everySeconds (an integer of at least 60, aligned to anchorAt when given) or one absolute RFC 3339 at instant; once stops a repeating routine after its first delivery. The name is the routine\'s identity: save upserts it and delete removes it, and neither needs a revision token. The schedule belongs to the Host rather than to your Session: it survives restarts, it fires unattended, and it is listed with who saved it and when. A routine the operator declared in the profile\'s own config is listed as origin \'config\' and cannot be saved over or deleted from here — ask the Human to patch that row. Saving needs no restart: the running Host arms the change as soon as the store changes. A declaration the Host cannot run is refused whole with the reason, and the routines that already run stay as they were.',
   parameters: {
     action: { type: 'string', required: true, enum: ['list', 'save', 'delete'] },
     name: { type: 'string', description: "The routine's name and identity: what save upserts and delete removes. Letters, digits, '-' and '_'." },
-    kind: { type: 'string', enum: ['wake', 'post'], description: "What a fire does. 'wake' (default) injects an instruction into one Agent Member's own session; 'post' commits a Message into a Channel as the Human." },
     everySeconds: { type: 'number', description: 'Repeating trigger: an integer of at least 60, aligned to anchorAt when given and to the first arming otherwise.' },
     at: { type: 'string', description: "One-shot trigger: an absolute RFC 3339 instant with an explicit offset or 'Z'." },
     anchorAt: { type: 'string', description: 'Optional phase anchor for everySeconds, as an absolute RFC 3339 instant.' },
@@ -735,10 +715,6 @@ const teamRoutine = defineTool({
     member: { type: 'string', description: "Wake target: a Member handle (a leading '@' is optional) or a branded 'member:<uuid>' id. Only an activated Member with a live session can be woken." },
     prompt: { type: 'string', description: "The instruction injected into that Member's session on every fire." },
     summary: { type: 'string', description: 'One-line account shown on the wake notice; defaults to the routine name.' },
-    channelRef: { type: 'string', description: "Post target: a full branded Channel ref from team_view, including the 'channel:' prefix. The Message lands in a new taskless Thread in the Workspace this call belongs to." },
-    mentions: { type: 'array', items: { type: 'string' }, description: 'Members the posted body must notify, by handle: each is rendered as @handle in front of the body. A mention is the only thing that reaches anybody, so name every Member who must act.' },
-    body: { type: 'string', description: 'The Message body, posted verbatim as the Human.' },
-    asTask: { type: 'boolean', description: 'Opens the posted Thread with a Task instead of taskless.' },
     workspace: workspaceParam,
   },
   output: {
@@ -788,10 +764,8 @@ const teamRoutine = defineTool({
       return { kind: 'deleted', name: result.name, removed: result.removed, routines: host.routinesForAgent(agent, { workspaceId }).routines.map(routineRow) }
     }
     if (args.action !== 'save') throw new Error(`unknown action '${String(args.action)}'`)
-    if (args.kind !== undefined && args.kind !== 'wake' && args.kind !== 'post') throw new Error("kind must be 'wake' or 'post'")
-    const posting = args.kind === 'post'
-    rejectExtraArguments(args, ['action', 'workspace', 'name', 'kind', 'everySeconds', 'at', 'anchorAt', 'once',
-      ...(posting ? ['channelRef', 'mentions', 'body', 'asTask'] : ['member', 'prompt', 'summary'])], 'save')
+    rejectExtraArguments(args, ['action', 'workspace', 'name', 'everySeconds', 'at', 'anchorAt', 'once',
+      'member', 'prompt', 'summary'], 'save')
     if (args.name === undefined || args.name.trim() === '') throw new Error('save requires the routine name')
     if ((args.everySeconds === undefined) === (args.at === undefined)) {
       throw new Error("save requires exactly one trigger: everySeconds (an integer of at least 60) or at (an absolute RFC 3339 instant)")
@@ -802,16 +776,10 @@ const teamRoutine = defineTool({
       ...(args.anchorAt === undefined ? {} : { anchorAt: args.anchorAt }),
       ...(args.once === undefined ? {} : { once: args.once }),
     }
-    const mentions = Array.isArray(args.mentions) ? args.mentions.filter((mention): mention is string => typeof mention === 'string' && mention.trim() !== '') : []
-    const declaration: RoutineConfig = posting
-      ? {
-          name: args.name, kind: 'post', workspaceId, channel: args.channelRef ?? '', mentions, body: args.body ?? '',
-          ...(args.asTask === undefined ? {} : { asTask: args.asTask }), ...trigger,
-        }
-      : {
-          name: args.name, member: args.member ?? '', prompt: args.prompt ?? '',
-          ...(args.summary === undefined ? {} : { summary: args.summary }), ...trigger,
-        }
+    const declaration: RoutineConfig = {
+      name: args.name, member: args.member ?? '', prompt: args.prompt ?? '',
+      ...(args.summary === undefined ? {} : { summary: args.summary }), ...trigger,
+    }
     const saved = host.saveRoutineForAgent(agent, { workspaceId, routine: declaration })
     return { kind: 'saved', routine: routineRow(saved.routine), created: saved.created, routines: host.routinesForAgent(agent, { workspaceId }).routines.map(routineRow) }
   },

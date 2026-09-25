@@ -1,17 +1,17 @@
 # 02 — the Host owns routines, and an agent can schedule one
 
-**What to build:** a Human says "post this to that channel every morning at nine" to any Agent Member, and the
-Member schedules it: the routine lands in the same store the GUI writes, the running Host picks it up without a
-restart, and the creator is recorded. The same Host methods serve the future global surface.
-**Blocked by:** None — the store and both actions are landed.
-**Status:** ready
+**What to build:** a Human says "every morning at nine, tell this agent to check the catalog" to any Agent Member,
+and the Member schedules it: the routine lands in the same store the GUI writes, the running Host picks it up
+without a restart, and the creator is recorded. The same Host methods serve the future global surface.
+**Blocked by:** None — the store is landed, and the wake-only redirect settled the declaration contract.
+**Status:** complete (2026-09-25) — the Host routine API plus the `team_routine` tool.
 
-- [ ] An Agent Member creates a routine through a Team tool, naming the Channel to post into, the body, the Members to mention, and one trigger; the routine arms and fires.
-- [ ] The same tool lists what exists and deletes by name, so a Member can answer "what is scheduled?" and undo its own mistake.
-- [ ] A Member can only schedule work in a Workspace it participates in, and a post routine can only target a Channel in that Workspace.
-- [ ] A declaration the Host cannot run is refused with the reason, and a refused save leaves the routines that already run untouched.
-- [ ] Every stored routine records who saved it and when, and that attribution reaches the surface; an operator's own `config.routines` entry reports as declared-there and is not silently overwritten.
-- [ ] The tool is reachable only through the `team-member` preset, like the other Team tools, and the tool docs list it.
+- [x] An Agent Member creates a routine through a Team tool, naming the Member to wake, the instruction to inject, and one trigger; the routine arms and fires.
+- [x] The same tool lists what exists and deletes by name, so a Member can answer "what is scheduled?" and undo its own mistake.
+- [x] A Member can only schedule work in a Workspace it participates in.
+- [x] A declaration the Host cannot run is refused with the reason, and a refused save leaves the routines that already run untouched.
+- [x] Every stored routine records who saved it and when, and that attribution reaches the surface; an operator's own `config.routines` entry reports as declared-there and is not silently overwritten.
+- [x] The tool is reachable only through the `team-member` preset, like the other Team tools, and the tool docs list it.
 
 ## Reconnaissance already done (do not re-derive)
 

@@ -27,13 +27,11 @@ Host 插件也可以在没有任何 Human、也没有 peer 发送者的情况下
 
 Team 自己附带一个 producer，即 `wowyuarm-agent-team-routines` 行：`config.routines` 列出要触发什么，每条 entry 声明且只声明一个 trigger——至少 60 的 `everySeconds`（给了 `anchorAt` 就按其对齐），或一个带明确 offset 的 RFC 3339 `at` 时刻。
 
-每条 entry 还用 `kind` 选择且只选择一个 action。wake 是默认值：用 handle 或带品牌的 id 指名 Member，并把指令注入该 Member 自己的 Session。`kind: 'post'` 的 entry 则给出带品牌的 `workspace:<uuid>` 与 `channel:<uuid>`，以及要投递的 `body` 和 body 必须携带的 `mentions`。
-
-post 以 Human 身份提交进一个新 Thread。凡是 body 里还没写到的 handle，都会在正文前渲染成 `@handle`——因为 mention 才是创建收件人 Inbox 条目、并让该 Member 起 turn 的东西，仅凭 Channel 成员身份不会通知任何人。`asTask: true` 改为带 Task 开这个 Thread。
+每条 entry 只做一件事：用 handle 或带品牌的 id 指名一个 Member，并携带要注入该 Member 自己 Session 的指令。routine 只会唤醒别人——一次触发是该 Member 的 turn，本身既不是 Message，也不是 Team 事实。
 
 无法运行的声明会在该行挂载时报错，因为「静默地永不触发」正是无人值守的 producer 事后无法报告的失败；唯一例外是 Host 停机期间已错过的 one-shot，它记为 `not-armed`，而不是让启动失败。
 
-每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`——投递记通道与 Session id，post 记落地的 Channel 及其提交的 Thread 与 Message，被拒记唤醒的 reason（Host 拒绝 post 时记 `post-failed`），错过的时刻记 `not-armed`——尽力而为：日志不可写时只 warn 而不抛出，超过 256 KiB 后只保留最新 200 行。指令以 `[ROUTINE FIRE] <name>` 为标题，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。
+每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`——`delivered` 记通道与 Session id，`failed` 记 reason（`unknown-member`、`member-not-enabled`、`no-live-session`、`wake-failed`）与 message，错过的时刻记 `not-armed`——尽力而为：日志不可写时只 warn 而不抛出，超过 256 KiB 后只保留最新 200 行。指令以 `[ROUTINE FIRE] <name>` 为标题，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。
 
 这个 store 并不专属于 operator：Web Client 的 routines 面板与 `team_routine` 工具写的是同一个 store，所以 Human 在对话里交代的那件事，Member 可以直接排进去，不必等 operator 改 profile。每条落库 routine 记下谁在何时保存；而在 `config.routines` 里声明的 entry 报为在那里声明，任何工具都不能覆盖或删除它。
 

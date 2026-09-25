@@ -919,8 +919,9 @@ export interface AgentTeamStatus {
  * The declaration is the same shape an operator writes on the producer row and
  * the store holds: one definition of a routine, whether it was declared there,
  * saved from the Web Client, or created by an Agent Member. `origin` says which
- * source it came from, and only a stored routine carries attribution — a
- * routine posts as the Human, so "who scheduled this?" has to stay answerable.
+ * source it came from, and only a stored routine carries attribution — any Agent
+ * Member may create one as well as the Human, so "who scheduled this?" has to
+ * stay answerable.
  */
 export interface AgentTeamRoutine {
   readonly name: string

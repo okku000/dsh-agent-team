@@ -13,7 +13,6 @@ import { readStoredRoutines, routineStorePath, writeRoutineStore } from '../src/
 import * as routines from '../src/routines.ts'
 import { routineFireLogPath, type RoutineFireRecord } from '../src/routines.ts'
 import type { RoutineConfig } from '../src/routine-schedule.ts'
-import type { AgentTeamChannelRef, AgentTeamRequestId } from '../src/types.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 
 /**
@@ -25,7 +24,6 @@ import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.
  */
 
 const alpha = WorkspaceId('workspace:alpha')
-const CHANNEL = 'channel:046dd831-c679-4279-b6aa-7813476cf12e' as AgentTeamChannelRef
 const HUMAN = { kind: 'human', memberId: AGENT_TEAM_HUMAN_MEMBER_ID, handle: 'human' }
 const cleanups: Array<() => Promise<void>> = []
 const originalDshHome = process.env.DSH_HOME
@@ -54,9 +52,9 @@ async function harness(): Promise<Context> {
   return ctx
 }
 
-/** A post routine targeting the one Channel this Host knows. */
-function post(overrides: Partial<RoutineConfig> = {}): RoutineConfig {
-  return { name: 'standup', kind: 'post', workspaceId: alpha, channel: CHANNEL, body: 'report your progress', mentions: ['scout'], everySeconds: 3600, ...overrides }
+/** One routine waking the Member this Host's roster names. */
+function routine(overrides: Partial<RoutineConfig> = {}): RoutineConfig {
+  return { name: 'standup', member: 'scout', prompt: 'report your progress', everySeconds: 3600, ...overrides }
 }
 
 /** Mount the producer row the way the loader does, so its `inject` and `effect` are the real ones. */
@@ -81,24 +79,24 @@ describe('the Host routine API', () => {
     const ctx = await harness()
     const team = ctx.agentTeam
 
-    const saved = team.saveRoutine({ workspaceId: alpha, routine: post() })
+    const saved = team.saveRoutine({ workspaceId: alpha, routine: routine() })
     expect(saved.created).toBe(true)
     expect(saved.routine).toMatchObject({
       name: 'standup', origin: 'store', createdBy: HUMAN,
-      declaration: { kind: 'post', channel: CHANNEL, body: 'report your progress', mentions: ['scout'], everySeconds: 3600 },
+      declaration: { member: 'scout', prompt: 'report your progress', everySeconds: 3600 },
     })
     // The declaration the API reports is the entry the producer reads back.
-    expect(readStoredRoutines(routineStorePath())[0]).toMatchObject({ name: 'standup', createdBy: HUMAN, kind: 'post' })
+    expect(readStoredRoutines(routineStorePath())[0]).toMatchObject({ name: 'standup', createdBy: HUMAN, member: 'scout' })
     expect(team.routines({ workspaceId: alpha }).routines).toEqual([saved.routine])
 
-    const replaced = team.saveRoutine({ workspaceId: alpha, routine: post({ body: 'report your progress, briefly' }) })
+    const replaced = team.saveRoutine({ workspaceId: alpha, routine: routine({ prompt: 'report your progress, briefly' }) })
     expect(replaced.created).toBe(false)
     expect(replaced.routine).toMatchObject({ createdBy: HUMAN })
     // A replacement records the new save without claiming to have created it.
     expect(replaced.routine.createdAt).toBe(saved.routine.createdAt)
     expect(replaced.routine.updatedBy).toEqual(HUMAN)
     expect(typeof replaced.routine.updatedAt).toBe('string')
-    expect(replaced.routine.declaration).toMatchObject({ body: 'report your progress, briefly' })
+    expect(replaced.routine.declaration).toMatchObject({ prompt: 'report your progress, briefly' })
     expect(team.routines({ workspaceId: alpha }).routines).toEqual([replaced.routine])
 
     expect(team.deleteRoutine({ workspaceId: alpha, name: 'standup' })).toEqual({ name: 'standup', removed: true })
@@ -114,30 +112,22 @@ describe('the Host routine API', () => {
     const withdraw = team.declareRoutines('wowyuarm-agent-team-routines', [declared])
 
     expect(team.routines({ workspaceId: alpha }).routines).toEqual([{ name: 'nightly-sweep', origin: 'config', declaration: declared }])
-    expect(() => team.saveRoutine({ workspaceId: alpha, routine: post({ name: 'nightly-sweep' }) })).toThrow(/declared by the operator on the 'wowyuarm-agent-team-routines' row/)
+    expect(() => team.saveRoutine({ workspaceId: alpha, routine: routine({ name: 'nightly-sweep' }) })).toThrow(/declared by the operator on the 'wowyuarm-agent-team-routines' row/)
     expect(() => team.deleteRoutine({ workspaceId: alpha, name: 'nightly-sweep' })).toThrow(/is not in the routine store/)
     expect(readStoredRoutines(routineStorePath())).toEqual([])
 
     // The row unloading withdraws its own declaration, and the name is free again.
     withdraw()
     expect(team.routines({ workspaceId: alpha }).routines).toEqual([])
-    expect(team.saveRoutine({ workspaceId: alpha, routine: post({ name: 'nightly-sweep' }) }).created).toBe(true)
-  })
-
-  it('refuses a post routine that targets another Workspace', async () => {
-    const ctx = await harness()
-    expect(() => ctx.agentTeam.saveRoutine({ workspaceId: alpha, routine: post({ workspaceId: 'workspace:beta' }) })).toThrow(/must be 'workspace:alpha'/)
-    // The Channel ref is resolved when the routine fires, not when it is saved:
-    // an unresolvable ref is a recorded fire refusal rather than a silent no-op.
-    expect(readStoredRoutines(routineStorePath())).toEqual([])
+    expect(team.saveRoutine({ workspaceId: alpha, routine: routine({ name: 'nightly-sweep' }) }).created).toBe(true)
   })
 
   it('refuses a declaration the Host cannot run and leaves the routines that already run untouched', async () => {
     const ctx = await harness()
     const team = ctx.agentTeam
-    team.saveRoutine({ workspaceId: alpha, routine: post() })
+    team.saveRoutine({ workspaceId: alpha, routine: routine() })
     const before = readFileSync(routineStorePath(), 'utf8')
-    expect(() => team.saveRoutine({ workspaceId: alpha, routine: post({ name: 'broken', everySeconds: 1 }) })).toThrow(/everySeconds/)
+    expect(() => team.saveRoutine({ workspaceId: alpha, routine: routine({ name: 'broken', everySeconds: 1 }) })).toThrow(/everySeconds/)
     expect(() => team.saveRoutine({ workspaceId: alpha, routine: { name: 'no-trigger', member: 'scout', prompt: 'check' } })).toThrow(/exactly one trigger/)
     expect(() => team.saveRoutine({ workspaceId: alpha, routine: { name: 'bad name', member: 'scout', prompt: 'check', everySeconds: 60 } })).toThrow(/name must match/)
     expect(readFileSync(routineStorePath(), 'utf8')).toBe(before)
@@ -148,7 +138,7 @@ describe('the Host routine API', () => {
     const ctx = await harness()
     // An operator edited the file by hand and broke it: the API says so rather
     // than reporting a Host with no routines at all.
-    writeRoutineStore(routineStorePath(), [post()])
+    writeRoutineStore(routineStorePath(), [routine()])
     writeFileSync(routineStorePath(), 'not json at all')
     expect(() => ctx.agentTeam.routines({ workspaceId: alpha })).toThrow(/unusable/)
   })
@@ -156,19 +146,20 @@ describe('the Host routine API', () => {
   it('arms a routine this Host saves while the producer row is already running', async () => {
     const ctx = await harness()
     const team = ctx.agentTeam
-    const created = await team.createChannel({ requestId: 'routine-arm' as AgentTeamRequestId, workspaceId: alpha, name: 'engineering', description: '' })
     await mountProducer(ctx, undefined)
 
     // No restart and no reload: the row that is already running re-reads the
     // store the moment the Host writes it, which is what a routine created from
-    // the Web Client or by an Agent Member has to mean.
+    // the Web Client or by an Agent Member has to mean. The wake itself is
+    // refused — this harness has no activated Member — and the refusal is what
+    // proves the store change reached the running row.
     team.saveRoutine({ workspaceId: alpha, routine: {
-      name: 'armed-live', kind: 'post', workspaceId: alpha, channel: created.channel.channelRef,
-      body: 'the nightly build is green', at: new Date(Date.now() + 400).toISOString(),
+      name: 'armed-live', member: 'scout', prompt: 'the nightly build is green',
+      at: new Date(Date.now() + 400).toISOString(),
     } })
 
     const fired = await waitForFireLog()
-    expect(fired).toMatchObject({ routine: 'armed-live', channel: created.channel.channelRef, outcome: 'posted' })
+    expect(fired).toMatchObject({ routine: 'armed-live', member: 'scout', outcome: 'failed' })
   }, 10_000)
 })
 

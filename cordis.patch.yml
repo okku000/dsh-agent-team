@@ -195,11 +195,10 @@
         - id: wowyuarm-agent-team-host
           name: '@wowyuarm/dsh-agent-team/host'
         # The Team's own routine producer: a schedule whose entries wake one
-        # named Member through the Host's `wakeMember`, or post one Message into
-        # a Channel as the Human. The row ships unconfigured because a routine
-        # names Members, Channels, and instants this package cannot know — a
-        # profile patches this id to supply `config.routines` (package README,
-        # "Routines"), and a row with no routines arms nothing.
+        # named Member through the Host's `wakeMember`. The row ships
+        # unconfigured because a routine names Members and instants this package
+        # cannot know — a profile patches this id to supply `config.routines`
+        # (package README, "Routines"), and a row with no routines arms nothing.
         - id: wowyuarm-agent-team-routines
           name: '@wowyuarm/dsh-agent-team/routines'
     - id: wowyuarm-agent-team-client

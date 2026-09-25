@@ -25,9 +25,9 @@
  * schedule, not the fire history, is what an operator edits, and every fire is
  * already recorded in the append-only log next to it.
  *
- * A routine saved through the Host also records who saved it and when. A
- * routine posts as the Human, and any Agent Member may create one, so "who
- * scheduled this?" has to stay answerable after the fact. Those keys are this
+ * A routine saved through the Host also records who saved it and when. An Agent
+ * Member may create one as well as the Human, so "who scheduled this?" has to
+ * stay answerable after the fact. Those keys are this
  * store's own: a caller's bookkeeping never enters, and the schedule's
  * validator reads only the fields it knows, so an entry written before
  * attribution existed still loads and still runs.

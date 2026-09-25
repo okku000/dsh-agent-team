@@ -1837,9 +1837,9 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Agent-only routine save. A Member schedules work in a Workspace it
-   * participates in, and a post routine may only target that Workspace; the
-   * recorded author is the live Member, never something the call supplies.
+   * Agent-only routine save. A Member may only schedule into a Workspace it
+   * participates in; the recorded author is the live Member, never something the
+   * call supplies.
    */
   saveRoutineForAgent(agent: Agent, request: AgentTeamSaveRoutineRequest): AgentTeamSaveRoutineResult {
     return this.saveRoutineAs(this.memberCall(agent, request.workspaceId), request)
@@ -2604,9 +2604,6 @@ export default class AgentTeam extends TypertRemoteService {
     // The declaration is validated as the row's validator validates one, so a
     // store entry and a config entry can never mean different things.
     normalizeRoutines([declaration], name === '' ? 'routine' : `routine '${name}'`)
-    if (declaration.kind === 'post' && declaration.workspaceId !== request.workspaceId) {
-      throw new Error(`a post routine's workspaceId must be '${request.workspaceId}', the Workspace this call belongs to; the declaration names '${String(declaration.workspaceId)}'`)
-    }
     const owner = this.declaredRoutineOwner(declaration.name)
     if (owner !== undefined) {
       throw new Error(`routine '${declaration.name}' is declared by the operator on the '${owner}' row; saving it here would leave that declaration in place and shadowed — save it under another name, or patch the row`)

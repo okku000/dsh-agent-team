@@ -4480,8 +4480,8 @@ describe('Agent Team change version domains', () => {
  * GUI-created routines work. The tool is reachable only through the
  * `team-member` preset, so this needs the real roster — and it is the behaviour
  * itself: a Member asks for something to happen later, the routine lands in the
- * store the Web Client writes, the running Host arms it without a restart, it
- * fires, and the Human's name is on what it committed.
+ * store the Web Client writes, the running Host arms it without a restart, and
+ * it fires into that Member's own Session.
  */
 describe('an Agent Member schedules a routine', () => {
   it('saves, lists, deletes, and fires a routine through team_routine, attributed to that Member', async () => {
@@ -4498,16 +4498,17 @@ describe('an Agent Member schedules a routine', () => {
     }
     await mountProducerRow(ctx)
 
-    // "Every morning, post this" — the Member says it, the routine belongs to it.
-    const saved = await call('routine-save', { action: 'save', workspace: workspaceId, name: 'standup', kind: 'post',
-      channelRef: channel.channel.channelRef, body: 'report your progress', mentions: ['scheduler'], everySeconds: 3600 })
+    // "Every morning, wake me and check this" — the Member says it, the routine
+    // belongs to it, and the fire lands in a Member's own Session.
+    const saved = await call('routine-save', { action: 'save', workspace: workspaceId, name: 'standup',
+      member: 'scheduler', prompt: 'report your progress', everySeconds: 3600 })
     expect(saved.created).toBe(true)
     expect(saved.routine).toMatchObject({ name: 'standup', origin: 'store' })
     expect(saved.routine.createdBy).toMatchObject({ kind: 'member', memberId: added.status.member.memberId, handle: 'scheduler' })
-    expect(readStoredRoutines(routineStorePath())).toMatchObject([{ name: 'standup', body: 'report your progress', createdBy: { handle: 'scheduler' } }])
+    expect(readStoredRoutines(routineStorePath())).toMatchObject([{ name: 'standup', prompt: 'report your progress', createdBy: { handle: 'scheduler' } }])
 
     const listed = await call('routine-list', { action: 'list', workspace: workspaceId })
-    expect(listed.routines).toMatchObject([{ name: 'standup', kind: 'post', channelRef: channel.channel.channelRef }])
+    expect(listed.routines).toMatchObject([{ name: 'standup', member: 'scheduler', prompt: 'report your progress', trigger: 'everySeconds' }])
 
     // A Member schedules only in a Workspace it participates in.
     const foreign = WorkspaceId('workspace:routine-foreign')
@@ -4524,10 +4525,10 @@ describe('an Agent Member schedules a routine', () => {
 
     // A one-shot the Member schedules while the row is already running fires
     // without a restart.
-    await call('routine-save-once', { action: 'save', workspace: workspaceId, name: 'once-report', kind: 'post',
-      channelRef: channel.channel.channelRef, body: 'the nightly build is green', at: new Date(Date.now() + 400).toISOString() })
+    await call('routine-save-once', { action: 'save', workspace: workspaceId, name: 'once-report',
+      member: 'scheduler', prompt: 'the nightly build is green', at: new Date(Date.now() + 400).toISOString() })
     const fired = await waitFor(latestFireRecord, 5000)
-    expect(fired).toMatchObject({ routine: 'once-report', channel: channel.channel.channelRef, outcome: 'posted' })
+    expect(fired).toMatchObject({ routine: 'once-report', member: 'scheduler', outcome: 'delivered' })
 
     const deleted = await call('routine-delete', { action: 'delete', workspace: workspaceId, name: 'standup' })
     expect(deleted).toMatchObject({ name: 'standup', removed: true })

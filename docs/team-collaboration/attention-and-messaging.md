@@ -29,13 +29,11 @@ A wake that does not land reports why — `unknown-member`, `member-not-enabled`
 
 The Team ships one producer itself, the `wowyuarm-agent-team-routines` row: `config.routines` lists what to fire, and each entry declares exactly one trigger — `everySeconds` of at least 60, aligned to `anchorAt` when given, or a single RFC 3339 `at` instant with an explicit offset.
 
-An entry also picks exactly one action with `kind`. A wake, the default, names a Member by handle or branded id and injects the instruction into that Member's own Session. A `kind: 'post'` entry names branded `workspace:<uuid>` and `channel:<uuid>` refs, plus the `body` and the `mentions` that body must carry.
-
-A post commits as the Human, into a new Thread. Every configured handle the body does not already name is rendered as `@handle` in front of it, because a mention is what creates the recipient's Inbox entry and starts that Member's turn — Channel membership alone notifies nobody. `asTask: true` opens that Thread with a Task instead.
+An entry does exactly one thing: it names one Member by handle or branded id and carries the instruction to inject into that Member's own Session. A routine only ever wakes somebody — a fire is that Member's turn, never a Message and never a Team fact of its own.
 
 A declaration that cannot run fails while the row mounts, because a routine that silently never fires is the one failure an unattended producer cannot report afterwards; a one-shot whose instant passed while the Host was down is the exception, recorded as `not-armed` rather than failing the boot.
 
-Each fire is appended to `$DSH_HOME/agent-team/routines/fires.jsonl` — the lane and Session id for a delivery, the Channel with the Thread and Message it committed for a post, the wake's reason for a refusal (`post-failed` when the Host refuses a post), `not-armed` for a spent instant — best-effort, warning rather than throwing, and trimmed to its newest 200 lines past 256 KiB. The instruction arrives framed as `[ROUTINE FIRE] <name>` with the Team's fixed UTC+8 instant and the statement that the turn is unattended and nobody is waiting in that conversation for a reply.
+Each fire is appended to `$DSH_HOME/agent-team/routines/fires.jsonl` — `delivered` with the lane and Session id, `failed` with the reason (`unknown-member`, `member-not-enabled`, `no-live-session`, `wake-failed`) and the message, `not-armed` for a spent instant — best-effort, warning rather than throwing, and trimmed to its newest 200 lines past 256 KiB. The instruction arrives framed as `[ROUTINE FIRE] <name>` with the Team's fixed UTC+8 instant and the statement that the turn is unattended and nobody is waiting in that conversation for a reply.
 
 The same store is not the operator's alone: the Web Client's routines surface and the `team_routine` tool write it too, so a Member a Human asks in conversation can schedule the work an operator would otherwise declare in the profile. Each stored routine records who saved it and when, while an entry declared in `config.routines` reports as declared there and no tool may overwrite or delete it.
 

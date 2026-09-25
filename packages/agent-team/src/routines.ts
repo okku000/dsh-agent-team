@@ -1,35 +1,31 @@
 /**
  * The Team's built-in routine producer: a schedule whose entries wake one named
- * Member or post one Message into a Channel.
+ * Member.
  *
  * The Host side of a wake lives in `member-wake.ts` — one producer-triggered
  * turn in a Member's own Session. This module is the producer the Team ships
- * itself: a row whose `config.routines` says when to fire and what to do, so a
+ * itself: a row whose `config.routines` says when to fire and whom to wake, so a
  * schedule needs no second plugin, no extra dependency, and no path wiring
  * beyond the row this bundle already inserts. A third-party producer (a watcher,
  * another Host plugin) still calls `wakeMember` exactly as this one does.
  *
- * The two actions end in different places, and that difference is the point:
- *
- * - A wake is context, never authority. It injects an instruction into a
- *   Member's own Session and commits nothing, so no other Member can cite it.
- * - A post commits a Team fact. It goes through the Host's Message-commit path
- *   as the Human who created the routine, which is what makes the mention in its
- *   body notify the Members it names and start their turns.
+ * A wake is context, never authority: it injects an instruction into a Member's
+ * own Session and commits nothing, so no other Member can cite it. Whatever the
+ * woken Member then decides to say or do is that Member's own Team work, made
+ * with its own identity and its own judgement.
  *
  * Two things are deliberately the producer's, not the Host's:
  *
  * - The fire log. A routine fires unattended, at a moment nobody is watching,
  *   and the ways a fire can fail are different operational answers — a typo in
  *   the schedule, a suspended Member, a Member this Host has not activated, a
- *   broken Session, a Channel that refuses the post. The Host reports the
- *   reason; only the producer can keep it, so every fire is appended to
+ *   broken Session. The Host reports the reason; only the producer can keep it,
+ *   so every fire is appended to
  *   `$DSH_HOME/agent-team/routines/fires.jsonl` and stays readable long after
  *   the console line is gone.
  * - The framing. A woken Member cannot infer from the instruction alone that
  *   this turn came from a schedule rather than from the Human or a peer, and
- *   that nobody is waiting for an answer. A posted body gets no such framing:
- *   it is the Human's own words, committed verbatim.
+ *   that nobody is waiting for an answer.
  *
  * The schedule itself (`routine-schedule.ts`) is pure; this row owns the
  * timers, the log, and the calls into the Host.
@@ -41,14 +37,12 @@ import { dirname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
-import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { AgentTeamWakeDeliveryError, type AgentTeamWakeMode, type AgentTeamWakeResult } from './member-wake.ts'
 import { mergeRoutines, readRoutineStore, routineStorePath, watchRoutineStore } from './routine-store.ts'
 import {
-  isRepeatingRoutine, nextRoutineOccurrence, routineBody, routinePostBody, routineSummary, routineTarget,
-  type PostAction, type Routine, type RoutineConfig, type RoutineFraming,
+  isRepeatingRoutine, nextRoutineOccurrence, routineBody, routineSummary, routineTarget,
+  type Routine, type RoutineConfig,
 } from './routine-schedule.ts'
-import type { AgentTeamChannelRef, AgentTeamMessageRef, AgentTeamRequestId, AgentTeamThreadRef } from './types.ts'
 
 /** Cordis row name; also the source kind every fire carries into the Member's log. */
 export const name = 'wowyuarm-agent-team-routines'
@@ -101,24 +95,11 @@ export interface RoutineDeliveredRecord {
   readonly recordedAt: string
 }
 
-/** One posted fire, as recorded: the Channel it landed in and what it committed there. */
-export interface RoutinePostedRecord {
-  readonly routine: string
-  readonly channel: string
-  readonly outcome: 'posted'
-  readonly threadRef: string
-  readonly messageRef: string
-  readonly firedAt: string
-  readonly recordedAt: string
-}
-
 /** One refused fire, as recorded: the reason is the operator's answer, the detail the message. */
 export interface RoutineFailedRecord {
   readonly routine: string
-  /** The Member a wake named; absent on a post. */
+  /** The Member the wake named. */
   readonly member?: string
-  /** The Channel a post named; absent on a wake. */
-  readonly channel?: string
   readonly outcome: 'failed'
   readonly reason: string
   readonly detail: string
@@ -129,17 +110,15 @@ export interface RoutineFailedRecord {
 /** One routine that had no future occurrence to arm. */
 export interface RoutineNotArmedRecord {
   readonly routine: string
-  /** The Member a wake named; absent on a post. */
+  /** The Member the wake names. */
   readonly member?: string
-  /** The Channel a post named; absent on a wake. */
-  readonly channel?: string
   readonly outcome: 'not-armed'
   readonly detail: string
   readonly recordedAt: string
 }
 
 /** One fire-log line. */
-export type RoutineFireRecord = RoutineDeliveredRecord | RoutinePostedRecord | RoutineFailedRecord | RoutineNotArmedRecord
+export type RoutineFireRecord = RoutineDeliveredRecord | RoutineFailedRecord | RoutineNotArmedRecord
 
 /**
  * Append-only fire log with a size cap.
@@ -167,54 +146,32 @@ export function createRoutineFireLog(path: string, warn: (message: string) => vo
   }
 }
 
-/** How one routine's target reads on a log line: the Member a wake names, or the Channel a post names. */
+/** How one routine's target reads on a log line. */
 function routineTargetLabel(routine: Routine): string {
-  return routine.action.kind === 'wake' ? `member '${routine.action.member}'` : `channel '${routine.action.channel}'`
+  return `member '${routine.member}'`
 }
 
-/**
- * The target field one fire record carries: a wake is recorded against the
- * Member it woke, a post against the Channel it posted into.
- *
- * Spread into the record rather than assigned, because
- * `exactOptionalPropertyTypes` refuses a `member: undefined` on a post.
- */
-function routineTargetFields(routine: Routine): { readonly member: string } | { readonly channel: string } {
-  return routine.action.kind === 'wake' ? { member: routine.action.member } : { channel: routine.action.channel }
+/** The Member field one fire record carries, frozen with the record. */
+function routineTargetFields(routine: Routine): { readonly member: string } {
+  return { member: routine.member }
 }
-
-/** What one successful post reports: where it landed and what it committed there. */
-export interface RoutinePostResult {
-  readonly channelRef: AgentTeamChannelRef
-  readonly threadRef: AgentTeamThreadRef
-  readonly messageRef: AgentTeamMessageRef
-}
-
-/** What one fire produced, and therefore which lane produced it. */
-export type RoutineFireOutcome =
-  | { readonly action: 'wake'; readonly result: AgentTeamWakeResult }
-  | { readonly action: 'post'; readonly result: RoutinePostResult }
 
 /** What the scheduler reports as it arms and fires; the row logs and records it. */
 export type RoutineEvent =
   | { readonly outcome: 'armed'; readonly routine: Routine; readonly next: number }
   | { readonly outcome: 'not-armed'; readonly routine: Routine; readonly detail: string }
   | { readonly outcome: 'delivered'; readonly routine: Routine; readonly firedAt: number; readonly result: AgentTeamWakeResult }
-  | { readonly outcome: 'posted'; readonly routine: Routine; readonly firedAt: number; readonly result: RoutinePostResult }
   | { readonly outcome: 'failed'; readonly routine: Routine; readonly firedAt: number; readonly reason: string; readonly detail: string }
 
 export interface RoutineSchedulerOptions {
   /** The validated routines to run. */
   readonly routines: readonly Routine[]
   /**
-   * Deliver one fire through whichever lane the routine's action picks. A refused
-   * wake arrives as an `AgentTeamWakeDeliveryError`; a post the Host will not
-   * commit throws like any other refused operation. The Host's `wakeMember`
-   * answers synchronously, so a producer that awaits something of its own — as a
-   * post does, committing through the ledger — may pass either a result or a
-   * promise of one.
+   * Deliver one fire. A refused wake arrives as an `AgentTeamWakeDeliveryError`.
+   * The Host's `wakeMember` answers synchronously; the promise arm keeps a
+   * producer that has something of its own to await working unchanged.
    */
-  readonly deliver: (routine: Routine, firedAtMs: number) => RoutineFireOutcome | Promise<RoutineFireOutcome>
+  readonly deliver: (routine: Routine, firedAtMs: number) => AgentTeamWakeResult | Promise<AgentTeamWakeResult>
   /** One observer for every arming, delivery and refusal. */
   readonly onEvent: (event: RoutineEvent) => void
 }
@@ -269,17 +226,14 @@ export class RoutineScheduler {
     this.disarm(routine.name)
     const firedAt = Date.now()
     try {
-      const outcome = await this.deliver(routine, firedAt)
-      this.onEvent(outcome.action === 'wake'
-        ? { outcome: 'delivered', routine, firedAt, result: outcome.result }
-        : { outcome: 'posted', routine, firedAt, result: outcome.result })
+      const result = await this.deliver(routine, firedAt)
+      this.onEvent({ outcome: 'delivered', routine, firedAt, result })
     } catch (error) {
       this.onEvent({
         outcome: 'failed',
         routine,
         firedAt,
-        reason: error instanceof AgentTeamWakeDeliveryError ? error.reason
-          : routine.action.kind === 'wake' ? 'wake-failed' : 'post-failed',
+        reason: error instanceof AgentTeamWakeDeliveryError ? error.reason : 'wake-failed',
         detail: error instanceof Error ? error.message : String(error),
       })
     }
@@ -333,54 +287,15 @@ export function apply(ctx: Context, config: Config): void {
   const recordedAt = (): string => new Date().toISOString()
   let scheduler: RoutineScheduler | undefined
 
-  /**
-   * Post one routine into its Channel, as the Human.
-   *
-   * A routine posts as the Human because that is who created it and who stays
-   * answerable for what it says. The request id is derived from the routine and
-   * the instant it fired for, so the same fire can never commit twice.
-   * @param routine - the post routine, name and action.
-   * @param firedAt - the firing instant in epoch milliseconds.
-   * @returns the fire outcome the scheduler records.
-   */
-  const postRoutine = async (routine: RoutineFraming<PostAction>, firedAt: number): Promise<RoutineFireOutcome> => {
-    const result = await ctx.agentTeam.sendMessage({
-      requestId: `routine:${routine.name}:${firedAt}` as AgentTeamRequestId,
-      workspaceId: routine.action.workspaceId as WorkspaceId,
-      channelRef: routine.action.channel as AgentTeamChannelRef,
-      body: routinePostBody(routine),
-      asTask: routine.action.asTask,
-    })
-    // A top-level send commits or throws. The Host's other two answers belong to
-    // the reply path, where a mention can be an invitation into a Thread that
-    // already exists; one arriving here means the Host changed shape under this
-    // producer, so it is reported as a failed fire rather than ignored.
-    if (result.kind !== 'committed') throw new Error(`the Host answered '${result.kind}' instead of committing the post`)
-    return {
-      action: 'post',
-      result: { channelRef: result.message.channelRef, threadRef: result.thread.threadRef, messageRef: result.message.messageRef },
-    }
-  }
-
   const buildScheduler = (routines: readonly Routine[]): RoutineScheduler => new RoutineScheduler({
     routines,
-    deliver: (routine, firedAt) => {
-      const { action } = routine
-      if (action.kind === 'wake') {
-        const framed = { name: routine.name, action }
-        return {
-          action: 'wake',
-          result: ctx.agentTeam.wakeMember({
-            ...routineTarget(action.member),
-            routine: routine.name,
-            plugin: name,
-            summary: routineSummary(framed),
-            body: routineBody(framed, firedAt),
-          }),
-        }
-      }
-      return postRoutine({ name: routine.name, action }, firedAt)
-    },
+    deliver: (routine, firedAt) => ctx.agentTeam.wakeMember({
+      ...routineTarget(routine.member),
+      routine: routine.name,
+      plugin: name,
+      summary: routineSummary(routine),
+      body: routineBody(routine, firedAt),
+    }),
     onEvent: event => {
       const { routine } = event
       if (event.outcome === 'armed') {
@@ -402,19 +317,6 @@ export function apply(ctx: Context, config: Config): void {
           outcome: 'delivered',
           mode: event.result.mode,
           sessionId: event.result.sessionId,
-          firedAt: new Date(event.firedAt).toISOString(),
-          recordedAt: recordedAt(),
-        })
-        return
-      }
-      if (event.outcome === 'posted') {
-        ctx.logger.info(`agent-team routines: '${routine.name}' posted into '${event.result.channelRef}' (thread '${event.result.threadRef}')`)
-        appendFire({
-          routine: routine.name,
-          channel: event.result.channelRef,
-          outcome: 'posted',
-          threadRef: event.result.threadRef,
-          messageRef: event.result.messageRef,
           firedAt: new Date(event.firedAt).toISOString(),
           recordedAt: recordedAt(),
         })
