@@ -17,7 +17,7 @@
 
 本节只列尚未结束的工作项；已结束的见 `archive/YYYY-MM/`。
 
-进行中一项（2026-09）：[Routines 与 producer 触发的唤醒](active/routines-and-wakes/README.md)——Host 侧 `wakeMember` 与 Team 自带的 routine producer 都已落地，只剩探针验证与 ifpf-harness 侧旧 producer 的退役。已归档的三项（2026-09）：[0.1.7 UI 设计语言再基线](archive/2026-09/ui-parity-0.1.7/README.md)（task:d3ec167b，2026-09-24 归档）、[Member Session 架构](archive/2026-09/member-session-architecture/README.md)、[Context continuity](archive/2026-09/context-continuity/README.md)。
+当前没有进行中的工作项。已归档的四项（2026-09）：[Routines 与 producer 触发的唤醒](archive/2026-09/routines-and-wakes/README.md)（2026-09-25 归档：Team 自带的 routine producer 落地并在探针机上完成一次真实发火）、[0.1.7 UI 设计语言再基线](archive/2026-09/ui-parity-0.1.7/README.md)（task:d3ec167b，2026-09-24 归档）、[Member Session 架构](archive/2026-09/member-session-architecture/README.md)、[Context continuity](archive/2026-09/context-continuity/README.md)。
 
 ## 临时材料和 UI 证据
 
