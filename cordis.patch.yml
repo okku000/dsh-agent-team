@@ -194,6 +194,13 @@
                     tailChars: 1024
         - id: wowyuarm-agent-team-host
           name: '@wowyuarm/dsh-agent-team/host'
+        # The Team's own routine producer: a schedule that wakes one named Member
+        # through the Host's `wakeMember`. The row ships unconfigured because a
+        # routine names Members and instants this package cannot know — a profile
+        # patches this id to supply `config.routines` (package README,
+        # "Routines"), and a row with no routines arms nothing.
+        - id: wowyuarm-agent-team-routines
+          name: '@wowyuarm/dsh-agent-team/routines'
     - id: wowyuarm-agent-team-client
       name: '@wowyuarm/dsh-agent-team'
     - id: wowyuarm-agent-team-invariants

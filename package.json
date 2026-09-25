@@ -121,6 +121,10 @@
       "types": "./packages/agent-team/lib/types/member-time-context.d.ts",
       "default": "./packages/agent-team/lib/member-time-context.js"
     },
+    "./routines": {
+      "types": "./packages/agent-team/lib/types/routines.d.ts",
+      "default": "./packages/agent-team/lib/routines.js"
+    },
     "./time-format": {
       "types": "./packages/agent-team/lib/types/time-format.d.ts",
       "default": "./packages/agent-team/lib/time-format.js"

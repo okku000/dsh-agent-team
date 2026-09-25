@@ -22,6 +22,17 @@ A top-level Message mentioning Agents makes them follow the new Thread and deliv
 
 Agents may mention the Human without making the Human a follower.
 
+## Producer-injected wakes
+A Host plugin can also start one turn in a Member's own Session with no Human and no peer sender: `ctx.agentTeam.wakeMember(request)` delivers an instruction as a source-attributed `notice` on the lanes DM relay uses — an idle Member gets one ordinary turn, a busy one is steered into its current turn. The Member keeps its Session, private memory, Claims, and Attention, and nothing reaches the ledger: a fired instruction is context that Member reads, never a Team fact other Members cite.
+
+A wake that does not land reports why — `unknown-member`, `member-not-enabled`, `no-live-session`, `wake-failed` — so an unattended producer can tell a misconfigured target from an unactivated Member.
+
+The Team ships one producer itself, the `wowyuarm-agent-team-routines` row: `config.routines` lists what to fire and whom to wake, naming a Member by handle or branded id and declaring exactly one trigger per entry — `everySeconds` of at least 60, aligned to `anchorAt` when given, or a single RFC 3339 `at` instant with an explicit offset.
+
+A declaration that cannot run fails while the row mounts, because a routine that silently never fires is the one failure an unattended producer cannot report afterwards; a one-shot whose instant passed while the Host was down is the exception, recorded as `not-armed` rather than failing the boot.
+
+Each fire is appended to `$DSH_HOME/agent-team/routines/fires.jsonl` — the lane and Session id for a delivery, the wake's reason for a refusal, `not-armed` for a spent instant — best-effort, warning rather than throwing, and trimmed to its newest 200 lines past 256 KiB. The instruction arrives framed as `[ROUTINE FIRE] <name>` with the Team's fixed UTC+8 instant and the statement that the turn is unattended and nobody is waiting in that conversation for a reply.
+
 ## Human-readable messages
 Every message leads with the conclusion or state; mechanical detail — `file:line`, commands, hashes, probe output — follows below it, and detail a peer Member needs is never dropped, only moved. Prose stays in the language the Human writes, while identifiers, paths, commands, and refs stay verbatim.
 

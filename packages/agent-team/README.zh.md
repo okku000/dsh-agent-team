@@ -18,6 +18,12 @@ Service 使用 `ctx.storageDomain`、`ctx.workspaceRegistry`、`ctx.agents`、`c
 
 `wakeMember(request)` 代表 Host 插件（而不是 Human）在一个指名 Member 自己的 Session 里发起一个 turn：按计划触发的 routine、watcher、或另一个插件。它是唤醒，不是新 agent——Member 保留自己的 Session、私有记忆、Claim 和 Thread Attention——走的是与 DM relay 相同的投递通道：idle 的 Member 得到一次普通 turn，busy 的 Member 被 steer 进当前 turn。指令以 producer 自己的 source `kind` 作为 `notice` 注入，其一行摘要由 Harness 的上限收束；账本不追加任何记录：被触发的指令是 Member 读到的上下文，而不是其他 Member 引用的 Team fact。未能落地的唤醒抛出 `AgentTeamWakeDeliveryError`，其 `reason` 为 `unknown-member`、`member-not-enabled`、`no-live-session` 或 `wake-failed`——无人值守的 producer 日志必须能区分配错的目标与尚未激活的 Member。目标从持久 roster 解析：精确 Member id，或 handle（大小写不敏感，前导 `@` 可有可无）。
 
+## Routine
+
+Team 自己就附带一个这样的 producer：`wowyuarm-agent-team-routines` 行（`@wowyuarm/dsh-agent-team/routines`），其 `config.routines` 列出要触发什么、唤醒谁。每条 entry 指名一个 Member——handle 或带品牌的 `member:<uuid>` id——携带指令，并声明且只声明一个 trigger：`everySeconds`（至少 60 的整数，给了 `anchorAt` 就按其对齐，否则按首次 arm 时刻对齐），或一个带明确 offset 或 `Z` 的 RFC 3339 `at` 时刻。`once: true` 让重复 routine 在首次投递后停止。无法运行的声明会在该行挂载时报错，因为「静默地永不触发」正是无人值守的 producer 事后无法报告的失败；唯一例外是 Host 停机期间已错过的 one-shot，它记为 `not-armed`，而不是让启动失败。
+
+被触发的 routine 以本行自己的 source `kind` 作为 `notice` 抵达 Member，标题为 `[ROUTINE FIRE] <name>`，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`：`delivered` 带投递通道与 Session id，`failed` 带唤醒的 `reason`（`unknown-member`、`member-not-enabled`、`no-live-session`、`wake-failed`）与其 message，或 `not-armed`。该记录是尽力而为的——日志不可写时只 warn，不会变成第二个失败——超过 256 KiB 后只保留最新 200 行。bundle 以未配置状态插入这一行，因为 routine 指名的 Member 与时刻不是 bundle 能知道的；操作者通过在自己 profile 里 patch 该行的 id 来提供 schedule，而 patch 会替换该行的整个 `config`。
+
 ## 持久化与生命周期
 
 `storage-domain` 在持久读取处校验每条 record，并拒绝被其他版本标记的 backend unit。Team 只在 `KvTable.put()` 完成后更新 projection。其 Fiber 持有 Domain handle；dispose 通过 Cordis 移除拒绝新的 Service 调用，排空已接受的 Domain write，并在名称可重新打开前关闭 backend unit。

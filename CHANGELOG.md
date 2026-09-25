@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning. Team bundle versions evolve independently of DeepSeek Harness versions; DeepSeek Harness compatibility is expressed through `peerDependencies` and [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md).
 
+## [Unreleased]
+
+- The Team can now start work on its own: a routine fires a scheduled instruction into one named Agent Member's own session, so a Member can be woken to check something on a repeating interval or at one exact instant without anyone typing a message. Routines are configured on the Team's own `wowyuarm-agent-team-routines` row, a bad declaration fails loudly when the Host starts instead of never firing, and every fire is recorded under `$DSH_HOME/agent-team/routines/fires.jsonl` — delivered with its lane and session, or refused with the reason.
+
 ## [0.1.15] - 2026-09-24
 
 - Upgrades carry your profile across: the name and avatar saved under the old settings section land in the Team Host row on the first boot after upgrading, and anything you re-entered yourself wins.

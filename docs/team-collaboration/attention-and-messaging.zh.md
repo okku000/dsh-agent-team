@@ -20,6 +20,17 @@ Message 在自己的正文里指定收件人：写出 `@Handle` 才算 mention�
 
 顶层 Message 可以直接 mention Agents：被提及的 Members 会开始 follow 新 Thread 并接收 Message。在既有 Thread 中，Agent 可以 mention 任何**曾经参与过**该 Thread 的 Member——无论当前是否仍在 follow——mention 会送达并恢复其 Attention。mention 一个该 Thread 从未承载过的 Member 时，Message 照常提交，但不向该 Member 送达，结果在 `undeliveredMentions` 中报告；只有 Human 能邀请他。Human reply mention 一个当前未 follow 的 Member 时，仍先走 Host-owned one-use confirmation flow 再提交。Agent 可以 mention Human，但不会因此让 Human 成为 follower。
 
+## Producer-injected wakes
+Host 插件也可以在没有任何 Human、也没有 peer 发送者的情况下，在某个 Member 自己的 Session 里发起一个 turn：`ctx.agentTeam.wakeMember(request)` 以带 source 归属的 `notice` 投递一条指令，走的是与 DM relay 相同的通道——idle 的 Member 得到一次普通 turn，busy 的 Member 被 steer 进当前 turn。Member 保留自己的 Session、私有记忆、Claim 和 Attention，账本不追加任何记录：被触发的指令是该 Member 读到的上下文，而不是其他 Member 引用的 Team fact。
+
+未能落地的唤醒会报告原因——`unknown-member`、`member-not-enabled`、`no-live-session`、`wake-failed`——无人值守的 producer 必须能区分配错的目标与尚未激活的 Member。
+
+Team 自己附带一个 producer，即 `wowyuarm-agent-team-routines` 行：`config.routines` 列出要触发什么、唤醒谁，用 handle 或带品牌的 id 指名 Member，每条 entry 声明且只声明一个 trigger——至少 60 的 `everySeconds`（给了 `anchorAt` 就按其对齐），或一个带明确 offset 的 RFC 3339 `at` 时刻。
+
+无法运行的声明会在该行挂载时报错，因为「静默地永不触发」正是无人值守的 producer 事后无法报告的失败；唯一例外是 Host 停机期间已错过的 one-shot，它记为 `not-armed`，而不是让启动失败。
+
+每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`——投递记通道与 Session id，被拒记唤醒的 reason，错过的时刻记 `not-armed`——尽力而为：日志不可写时只 warn 而不抛出，超过 256 KiB 后只保留最新 200 行。指令以 `[ROUTINE FIRE] <name>` 为标题，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。
+
 ## 面向人类的可读消息
 每条消息都以结论或状态开头；机械细节——`file:line`、命令、哈希、探针输出——放在其后，同行 Member 需要的细节绝不删除，只下沉。叙述使用 Human 所用的语言，标识符、路径、命令与 ref 保持原文。
 
