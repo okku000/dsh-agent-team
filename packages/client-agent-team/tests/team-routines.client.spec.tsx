@@ -20,7 +20,7 @@ function routineRow(name: string, declaration: Record<string, unknown> = {}, ove
   return {
     name,
     origin: 'store',
-    declaration: { name, member: 'member:builder', prompt: `run ${name}`, once: false, everySeconds: 3600, ...declaration },
+    declaration: { name, member: 'member:builder', prompt: `run ${name}`, once: false, cron: '*/15 * * * *', ...declaration },
     createdBy: { kind: 'human', memberId: 'member:human', handle: 'human' },
     createdAt: '2026-09-25T02:00:00.000Z',
     ...overrides,
@@ -47,10 +47,10 @@ describe('Team routine surfaces', () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     b.seedRoutines([
       routineRow('morning-check'),
-      routineRow('legacy-sweep', { member: 'member:worker', prompt: '把待办整理一遍', everySeconds: 900, anchorAt: '2026-09-26T09:00+08:00' }),
+      routineRow('weekly-sweep', { member: 'member:worker', prompt: '把待办整理一遍', cron: '0 9 * * 1' }),
       routineRow('operator-pinned', {}, {
         origin: 'config',
-        declaration: { name: 'operator-pinned', member: 'member:builder', prompt: 'operator declared', everySeconds: 60 },
+        declaration: { name: 'operator-pinned', member: 'member:builder', prompt: 'operator declared', cron: '0 * * * *' },
         createdBy: undefined,
         createdAt: undefined,
       }),
@@ -68,7 +68,9 @@ describe('Team routine surfaces', () => {
     // The store holds a branded Member id; the roster is what turns it back into
     // the handle a reader recognizes.
     expect(within(page).getByText('唤醒 @worker')).toBeTruthy()
-    expect(within(page).getByText('每 900 秒 · 对齐 2026-09-26T09:00+08:00 · 持续重复')).toBeTruthy()
+    // The expression leads the schedule line exactly as it was saved, and the
+    // next fire rides behind it in the Host's zone rather than the reader's.
+    expect(within(page).getByText(/^cron 0 9 \* \* 1 · 每次到点都触发 · 下次 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)).toBeTruthy()
     // Only a stored routine is editable: an operator's own declaration belongs
     // to their profile file, and a button the Host would refuse is worse than
     // saying where the row comes from.
@@ -96,18 +98,52 @@ describe('Team routine surfaces', () => {
     expect(b.saveRoutine).not.toHaveBeenCalled()
     fireEvent.change(within(dialog).getByLabelText('名称'), { target: { value: 'nightly' } })
     fireEvent.change(within(dialog).getByLabelText('指令'), { target: { value: '检查模型目录有没有变化' } })
+    // An empty trigger is its own refusal: a routine has no other way to say when.
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect((await within(dialog).findByRole('alert')).textContent).toContain('请填写 cron 表达式')
+    expect(b.saveRoutine).not.toHaveBeenCalled()
+    fireEvent.change(within(dialog).getByLabelText('cron 表达式'), { target: { value: '0 9 * * 1' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(b.view.queryByRole('dialog')).toBeNull())
-    // The picker's default target is a branded Member id, and the interval the
-    // editor opened with is the one that is saved.
+    // The picker's default target is a branded Member id, and the expression the
+    // reader wrote is the one that is saved.
     expect(b.saveRoutine).toHaveBeenCalledWith({
       workspaceId: 'w1',
-      routine: { name: 'nightly', member: 'member:builder', prompt: '检查模型目录有没有变化', once: false, everySeconds: 3600 },
+      routine: { name: 'nightly', member: 'member:builder', prompt: '检查模型目录有没有变化', once: false, cron: '0 9 * * 1' },
     })
     // A routine save emits no Team `changes` event — it is configuration, not a
     // ledger fact — so the page re-reads itself and the row appears unwoken.
     expect(await within(page).findByText('nightly')).toBeTruthy()
     expect(b.routines.mock.calls.length).toBeGreaterThan(1)
+    await b.runtime.dispose()
+  })
+
+  it('answers an expression while it is written, with the Host’s own parser and zone', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
+    const page = await openRoutines(b)
+    fireEvent.click(within(page).getByRole('button', { name: '新建定时任务' }))
+    const dialog = await b.view.findByRole('dialog', { name: '新建定时任务' })
+    expect(within(dialog).getByText('按 Host 所在时区（Asia/Tokyo）计算')).toBeTruthy()
+    // Nothing is claimed about an expression that has not been written yet.
+    expect(within(dialog).queryByText('接下来 3 次')).toBeNull()
+    const field = within(dialog).getByLabelText('cron 表达式')
+    fireEvent.change(field, { target: { value: '*/15 * * * *' } })
+    expect(within(dialog).getByText('接下来 3 次')).toBeTruthy()
+    // Three instants, and each one is a wall-clock reading, not an offset.
+    expect(within(dialog).getAllByRole('listitem').map(item => item.textContent))
+      .toHaveLength(3)
+    expect(within(dialog).getAllByRole('listitem').every(item => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(item.textContent ?? ''))).toBe(true)
+    // The parser's own message travels into the reader's language, and the
+    // refusal the reader can fix never reaches the Host.
+    fireEvent.change(field, { target: { value: '0 9 * *' } })
+    expect(within(dialog).getByText(/这个 cron 表达式读不出来：.*must have five fields/)).toBeTruthy()
+    fireEvent.change(field, { target: { value: '0 0 30 2 *' } })
+    expect(within(dialog).getByText('这个表达式在五年内不会触发，请检查日、月、周字段')).toBeTruthy()
+    fireEvent.change(within(dialog).getByLabelText('名称'), { target: { value: 'never' } })
+    fireEvent.change(within(dialog).getByLabelText('指令'), { target: { value: 'nope' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect((await within(dialog).findByRole('alert')).textContent).toContain('这个表达式在五年内不会触发')
+    expect(b.saveRoutine).not.toHaveBeenCalled()
     await b.runtime.dispose()
   })
 
@@ -119,6 +155,7 @@ describe('Team routine surfaces', () => {
     b.failRoutineSave('member:builder is archived')
     fireEvent.change(within(dialog).getByLabelText('名称'), { target: { value: 'nightly' } })
     fireEvent.change(within(dialog).getByLabelText('指令'), { target: { value: '检查模型目录' } })
+    fireEvent.change(within(dialog).getByLabelText('cron 表达式'), { target: { value: '0 9 * * *' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     // A declaration the Host cannot run is refused whole: the dialog keeps the
     // reader's work and says why, and the running schedule is untouched.

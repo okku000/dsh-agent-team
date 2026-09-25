@@ -17,7 +17,7 @@
 
 本节只列尚未结束的工作项；已结束的见 `archive/YYYY-MM/`。
 
-进行中一项：[从 Team GUI 创建 routine](active/gui-routines/README.md)（2026-09-25：store 与引擎的两种 action 已落地，Remote CRUD 与设置区界面待做）。
+进行中一项：[从 Team GUI 创建 routine](active/gui-routines/README.md)（2026-09-26：store、wake-only 引擎、Host API、agent 工具、全局界面与 cron-only trigger 均已落地，剩下 fire 结果上界面）。
 
 已归档的四项（2026-09）：[Routines 与 producer 触发的唤醒](archive/2026-09/routines-and-wakes/README.md)（2026-09-25 归档：Team 自带的 routine producer 落地并在探针机上完成一次真实发火）、[0.1.7 UI 设计语言再基线](archive/2026-09/ui-parity-0.1.7/README.md)（task:d3ec167b，2026-09-24 归档）、[Member Session 架构](archive/2026-09/member-session-architecture/README.md)、[Context continuity](archive/2026-09/context-continuity/README.md)。
 

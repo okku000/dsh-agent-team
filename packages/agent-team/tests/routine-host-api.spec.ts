@@ -7,11 +7,10 @@ import { Storage } from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
 import { readStoredRoutines, routineStorePath, writeRoutineStore } from '../src/routine-store.ts'
 import * as routines from '../src/routines.ts'
-import { routineFireLogPath, type RoutineFireRecord } from '../src/routines.ts'
 import type { RoutineConfig } from '../src/routine-schedule.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 
@@ -54,7 +53,7 @@ async function harness(): Promise<Context> {
 
 /** One routine waking the Member this Host's roster names. */
 function routine(overrides: Partial<RoutineConfig> = {}): RoutineConfig {
-  return { name: 'standup', member: 'scout', prompt: 'report your progress', everySeconds: 3600, ...overrides }
+  return { name: 'standup', member: 'scout', prompt: 'report your progress', cron: '0 * * * *', ...overrides }
 }
 
 /** Mount the producer row the way the loader does, so its `inject` and `effect` are the real ones. */
@@ -83,7 +82,7 @@ describe('the Host routine API', () => {
     expect(saved.created).toBe(true)
     expect(saved.routine).toMatchObject({
       name: 'standup', origin: 'store', createdBy: HUMAN,
-      declaration: { member: 'scout', prompt: 'report your progress', everySeconds: 3600 },
+      declaration: { member: 'scout', prompt: 'report your progress', cron: '0 * * * *' },
     })
     // The declaration the API reports is the entry the producer reads back.
     expect(readStoredRoutines(routineStorePath())[0]).toMatchObject({ name: 'standup', createdBy: HUMAN, member: 'scout' })
@@ -108,7 +107,7 @@ describe('the Host routine API', () => {
   it('reports an operator declaration as declared there and refuses to shadow or delete it', async () => {
     const ctx = await harness()
     const team = ctx.agentTeam
-    const declared: RoutineConfig = { name: 'nightly-sweep', member: 'scout', prompt: 'check the model catalog', everySeconds: 86400 }
+    const declared: RoutineConfig = { name: 'nightly-sweep', member: 'scout', prompt: 'check the model catalog', cron: '0 0 * * *' }
     const withdraw = team.declareRoutines('wowyuarm-agent-team-routines', [declared])
 
     expect(team.routines({ workspaceId: alpha }).routines).toEqual([{ name: 'nightly-sweep', origin: 'config', declaration: declared }])
@@ -127,9 +126,11 @@ describe('the Host routine API', () => {
     const team = ctx.agentTeam
     team.saveRoutine({ workspaceId: alpha, routine: routine() })
     const before = readFileSync(routineStorePath(), 'utf8')
-    expect(() => team.saveRoutine({ workspaceId: alpha, routine: routine({ name: 'broken', everySeconds: 1 }) })).toThrow(/everySeconds/)
-    expect(() => team.saveRoutine({ workspaceId: alpha, routine: { name: 'no-trigger', member: 'scout', prompt: 'check' } })).toThrow(/exactly one trigger/)
-    expect(() => team.saveRoutine({ workspaceId: alpha, routine: { name: 'bad name', member: 'scout', prompt: 'check', everySeconds: 60 } })).toThrow(/name must match/)
+    expect(() => team.saveRoutine({ workspaceId: alpha, routine: routine({ name: 'broken', cron: '0 9 * *' }) })).toThrow(/cron '0 9 \* \*' must have five fields/)
+    expect(() => team.saveRoutine({ workspaceId: alpha, routine: routine({ name: 'never', cron: '0 0 30 2 *' }) })).toThrow(/never fires within five years/)
+    expect(() => team.saveRoutine({ workspaceId: alpha, routine: { name: 'no-trigger', member: 'scout', prompt: 'check' } as never })).toThrow(/\.cron must be a non-empty string/)
+    expect(() => team.saveRoutine({ workspaceId: alpha, routine: { name: 'bad name', member: 'scout', prompt: 'check', cron: '* * * * *' } })).toThrow(/name must match/)
+    expect(() => team.saveRoutine({ workspaceId: alpha, routine: { ...routine({ name: 'legacy' }), everySeconds: 60 } as never })).toThrow(/\.everySeconds is no longer supported/)
     expect(readFileSync(routineStorePath(), 'utf8')).toBe(before)
     expect(team.routines({ workspaceId: alpha }).routines.map(entry => entry.name)).toEqual(['standup'])
   })
@@ -147,33 +148,37 @@ describe('the Host routine API', () => {
     const ctx = await harness()
     const team = ctx.agentTeam
     await mountProducer(ctx, undefined)
+    const info = vi.spyOn(ctx.logger, 'info')
 
     // No restart and no reload: the row that is already running re-reads the
     // store the moment the Host writes it, which is what a routine created from
-    // the Web Client or by an Agent Member has to mean. The wake itself is
-    // refused — this harness has no activated Member — and the refusal is what
-    // proves the store change reached the running row.
+    // the Web Client or by an Agent Member has to mean. What proves the change
+    // reached the running row is the row arming it — a cron expression fires on
+    // the minute, so waiting for the fire itself would make this test cost a
+    // minute of wall clock, and the fire path is covered where the timers are.
     team.saveRoutine({ workspaceId: alpha, routine: {
-      name: 'armed-live', member: 'scout', prompt: 'the nightly build is green',
-      at: new Date(Date.now() + 400).toISOString(),
+      name: 'armed-live', member: 'scout', prompt: 'the nightly build is green', cron: '* * * * *',
     } })
 
-    const fired = await waitForFireLog()
-    expect(fired).toMatchObject({ routine: 'armed-live', member: 'scout', outcome: 'failed' })
+    await waitForArmed(info)
+    expect(info.mock.calls.map(call => String(call[0])).some(line => line.includes("'armed-live' armed for"))).toBe(true)
   }, 10_000)
+
+  it('reports the zone it reads every expression in, so a Client can preview the Host\'s fires', async () => {
+    const ctx = await harness()
+    // The zone travels with the schedule because a cron expression says nothing
+    // about where it is read: a preview computed anywhere else would name an
+    // instant this Host is not going to fire at.
+    expect(ctx.agentTeam.routines({ workspaceId: alpha }).zone).toBe(new Intl.DateTimeFormat().resolvedOptions().timeZone)
+  })
 })
 
-/** Wait for the producer to append one fire record, however long the store watcher takes. */
-async function waitForFireLog(timeoutMs = 5000): Promise<RoutineFireRecord | undefined> {
+/** Wait for the running row to arm a routine, however long the store watcher takes. */
+async function waitForArmed(info: { readonly mock: { readonly calls: readonly unknown[][] } }, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    try {
-      const text = readFileSync(routineFireLogPath(), 'utf8').trim()
-      if (text !== '') return JSON.parse(text.split('\n').at(-1)!) as RoutineFireRecord
-    } catch {
-      // No log yet: the routine has not fired.
-    }
+    if (info.mock.calls.some(call => String(call[0]).includes('armed'))) return
     await new Promise(resolve => setTimeout(resolve, 25))
   }
-  return undefined
+  throw new Error('the producer row never armed the saved routine')
 }

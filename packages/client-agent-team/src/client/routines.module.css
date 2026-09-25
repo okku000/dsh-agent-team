@@ -117,20 +117,44 @@
   font-weight: 600;
 }
 
-/* The editor's trigger choice: two labelled radios on one line, so the field
-   reads as one decision rather than two independent settings. */
-.radios {
-  display: flex;
-  gap: 16px;
+/* The expression field's own three lines: what the grammar is, which clock the
+   Host reads it on, and the fires it would keep. They sit under the input as one
+   quiet block so the field reads as a single decision. */
+.cronHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
 }
-.radio {
-  align-items: center;
+.cronZone {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+/* The preview is the Host's own answer, not a sales pitch: plain instants, one
+   per line, in tabular figures so three of them stack into a readable column. */
+.firesLabel {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.fires {
   color: var(--dsw-alias-label-primary);
-  cursor: pointer;
-  display: flex;
-  font-size: 13px;
-  gap: 6px;
-  line-height: 20px;
+  display: grid;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  gap: 2px;
+  line-height: 18px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.firesInvalid {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
 }
 /* A prompt is a sentence or two, not a line: the shared Input atom is a
    single-line control, so the instruction gets the same chrome on a textarea.
@@ -157,17 +181,4 @@
 .textarea:disabled,
 .select:disabled {
   color: var(--dsw-alias-label-tertiary);
-}
-/* One optional field rides a second column beside its sibling so the dialog
-   does not grow a line per option; it collapses to one column on a narrow
-   seat rather than squeezing either control below its usable width. */
-.pair {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-@media (max-width: 520px) {
-  .pair {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }

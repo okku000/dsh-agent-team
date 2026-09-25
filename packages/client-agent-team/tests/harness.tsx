@@ -388,8 +388,11 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; workspaceId?: s
   let routineReadFailure: string | undefined
   let routineSaveFailure: string | undefined
   let routineDeleteFailure: string | undefined
+  // The zone the Host reads every expression in. A fixed one keeps a rendered
+  // next fire assertable, and it is deliberately not the test runner's zone.
+  const routineZone = 'Asia/Tokyo'
   const routines = vi.fn(async (_request: { workspaceId: string }) => routineReadFailure === undefined
-    ? { ok: true as const, value: { routines: routineRows } }
+    ? { ok: true as const, value: { routines: routineRows, zone: routineZone } }
     : { ok: false as const, error: { message: routineReadFailure } })
   // The name is the identity, so a save is an upsert: the double replaces an
   // entry the store already held rather than appending a second one.

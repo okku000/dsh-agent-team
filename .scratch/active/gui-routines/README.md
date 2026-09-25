@@ -1,7 +1,17 @@
 # Routines created from the Team GUI
 
-Status: in progress — the store, the wake-only engine, the Host API, the agent tool, and the global surface are landed; a fire's outcome on that surface remains.
-Last checked: 2026-09-25.
+Status: in progress — the store, the wake-only engine, the Host API, the agent tool, the global surface, and the
+cron-only trigger are landed; a fire's outcome on that surface remains.
+Last checked: 2026-09-26.
+
+## Redirect: cron only
+
+On 2026-09-26 the Human narrowed the trigger itself: 「全部cron式に。cron式のみにしてシンプルに管理したい」. The interval,
+anchor, and absolute-instant forms therefore left the schedule contract, the engine, the store's validation, the
+`team_routine` tool, and the Client editor in one change, and a routine is now `{ cron, once? }` — one five-field
+expression read on the Host's own clock, with `once: true` for a single fire. Host and Client share one parser
+through a new subpath export. `05` is complete; nothing shipped with the old forms, so there is no migration to run
+and the mapping lives in [#05](issues/05-cron-only-trigger.md).
 
 ## Redirect: wake only
 
@@ -21,7 +31,8 @@ declared in the profile is listed and marked rather than offered for edit.
 
 That closes the Human's stated payoff — scheduling something by saying it to an agent is visible and editable end to
 end — except for one thing: the surface shows the schedule, not what a fire did. A delivered or refused fire is a
-line in the Host's fire log and nothing reads it, so `04` is the remaining slice.
+line in the Host's fire log and nothing reads it, so `04` is the remaining slice. `05` then simplified the trigger
+to one cron expression, which is a contract change rather than a new slice of the surface.
 
 Blocked: nothing. `04` is the frontier.
 
@@ -56,5 +67,6 @@ sentence with the real contract once the read exists.
 - `issues/02-host-api-and-agent-tool.md` — complete: the Host routine API plus `team_routine`.
 - `issues/03-global-routines-surface.md` — complete: the global surface that lists, creates, edits, and deletes.
 - `issues/04-fire-outcome-on-the-surface.md` — the frontier: a fire's outcome on that surface.
+- `issues/05-cron-only-trigger.md` — complete: one cron expression as the only trigger, shared by Host and Client.
 
 Confirmed scope, the resolved UI placement, and the authority note about agent-created routines: [spec.md](spec.md).

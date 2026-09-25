@@ -26,6 +26,7 @@ const own = {
   '@wowyuarm/dsh-agent-team/member-context': ['./packages/agent-team/src/member-context.ts'],
   '@wowyuarm/dsh-agent-team/mentions': ['./packages/agent-team/src/mentions.ts'],
   '@wowyuarm/dsh-agent-team/member-skills': ['./packages/agent-team/src/member-skills.ts'],
+  '@wowyuarm/dsh-agent-team/cron': ['./packages/agent-team/src/cron-expression.ts'],
   '@wowyuarm/dsh-agent-team/tools': ['./packages/tool-agent-team/src/index.ts'],
   '@wowyuarm/dsh-agent-team/client': ['./packages/client-agent-team/src/client/index.ts'],
 }
@@ -72,6 +73,7 @@ const buildOwn = {
   '@wowyuarm/dsh-agent-team/member-context': ['./packages/agent-team/lib/types/member-context.d.ts'],
   '@wowyuarm/dsh-agent-team/mentions': ['./packages/agent-team/lib/types/mentions.d.ts'],
   '@wowyuarm/dsh-agent-team/member-skills': ['./packages/agent-team/lib/types/member-skills.d.ts'],
+  '@wowyuarm/dsh-agent-team/cron': ['./packages/agent-team/lib/types/cron-expression.d.ts'],
   '@wowyuarm/dsh-agent-team/tools': ['./packages/tool-agent-team/lib/types/index.d.ts'],
   '@wowyuarm/dsh-agent-team/client': ['./packages/client-agent-team/lib/types/client/index.d.ts'],
 }

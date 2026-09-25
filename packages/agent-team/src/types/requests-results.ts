@@ -944,6 +944,15 @@ export interface AgentTeamRoutinesRequest {
 /** The whole schedule, in the order the Host arms it. */
 export interface AgentTeamRoutinesResult {
   readonly routines: readonly AgentTeamRoutine[]
+  /**
+   * The IANA zone the Host evaluates every expression in — its own local zone.
+   *
+   * It travels with the schedule because a cron expression says nothing about
+   * where it is read: a Client that previewed the next fires in the browser's
+   * zone would show a different instant than the one the Host will actually
+   * fire at.
+   */
+  readonly zone: string
 }
 
 /**

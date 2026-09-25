@@ -6,7 +6,6 @@ import {
   routineBody,
   routineSummary,
   routineTarget,
-  ROUTINE_MIN_INTERVAL_SECONDS,
   type Routine,
 } from '../src/routine-schedule.ts'
 
@@ -15,28 +14,31 @@ const ROUTINE = {
   name: 'model-bump-check',
   member: 'wakee@harness',
   prompt: 'check the model catalog',
+  cron: '*/15 * * * *',
 } as const
+
+/** The zone and instant validation evaluates in, so a test never reads the clock. */
+const AT = Date.parse('2026-09-25T00:00:00Z')
+const FIXED = { timeZone: 'UTC', nowMs: AT } as const
 
 /** One validated routine, so the math can be exercised without the config layer. */
 function routine(overrides: Partial<Routine> = {}): Routine {
-  return { name: ROUTINE.name, member: ROUTINE.member, prompt: ROUTINE.prompt, once: false, ...overrides }
+  return { name: ROUTINE.name, member: ROUTINE.member, prompt: ROUTINE.prompt, once: false, cron: ROUTINE.cron, ...overrides }
 }
 
 describe('routine configuration', () => {
-  it('accepts one trigger, and normalizes text fields', () => {
-    const [interval, instant] = normalizeRoutines([
-      { ...ROUTINE, member: '  wakee@harness  ', prompt: '  go  ', everySeconds: 60 },
-      { ...ROUTINE, name: 'one-shot', at: '2026-09-25T09:00:00+09:00', summary: '  nightly  ' },
-    ])
-    expect(interval).toEqual({ name: 'model-bump-check', member: 'wakee@harness', prompt: 'go', once: false, everySeconds: 60 })
-    expect(interval?.at).toBeUndefined()
-    expect(instant?.at).toBe(Date.parse('2026-09-25T09:00:00+09:00'))
-    expect(instant).toMatchObject({ summary: 'nightly' })
+  it('accepts one cron trigger, and normalizes text fields', () => {
+    const [quarterly, weekly] = normalizeRoutines([
+      { ...ROUTINE, member: '  wakee@harness  ', prompt: '  go  ' },
+      { ...ROUTINE, name: 'one-shot', cron: '  30  9  *  *  1 ', once: true, summary: '  nightly  ' },
+    ], 'routines', FIXED)
+    expect(quarterly).toEqual({ name: 'model-bump-check', member: 'wakee@harness', prompt: 'go', once: false, cron: '*/15 * * * *' })
+    expect(weekly).toEqual({ name: 'one-shot', member: 'wakee@harness', prompt: 'check the model catalog', once: true, cron: '30 9 * * 1', summary: 'nightly' })
   })
 
   it('carries only the fields a wake needs, so a routine has exactly one shape', () => {
-    const [declared] = normalizeRoutines([{ ...ROUTINE, everySeconds: 60, channel: 'channel:someone-elses', body: 'ignored' } as never])
-    expect(declared).toEqual({ name: 'model-bump-check', member: 'wakee@harness', prompt: 'check the model catalog', once: false, everySeconds: 60 })
+    const [declared] = normalizeRoutines([{ ...ROUTINE, channel: 'channel:someone-elses', body: 'ignored' } as never], 'routines', FIXED)
+    expect(declared).toEqual({ name: 'model-bump-check', member: 'wakee@harness', prompt: 'check the model catalog', once: false, cron: '*/15 * * * *' })
   })
 
   it('reads an absent or empty list as no routines', () => {
@@ -47,20 +49,33 @@ describe('routine configuration', () => {
   it('refuses a config that cannot run, naming the entry', () => {
     expect(() => normalizeRoutines({ routines: [] })).toThrow(/must be a list/)
     expect(() => normalizeRoutines(['nope'])).toThrow(/routines\[0\] must be a mapping/)
-    expect(() => normalizeRoutines([{ ...ROUTINE }])).toThrow(/needs exactly one trigger/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, everySeconds: 60, at: '2026-09-25T09:00:00Z' }])).toThrow(/needs exactly one trigger/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, everySeconds: ROUTINE_MIN_INTERVAL_SECONDS - 1 }])).toThrow(/integer >= 60/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, everySeconds: 90.5 }])).toThrow(/integer >= 60/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, name: 'bad name' }])).toThrow(/.name must match/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, name: '-leading' }])).toThrow(/.name must match/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, member: '   ' }])).toThrow(/.member must be a Member handle or id/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, prompt: '' }])).toThrow(/.prompt must be a non-empty instruction/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, summary: ' ' }])).toThrow(/.summary must be a non-empty string/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, once: 'yes' }])).toThrow(/.once must be a boolean/)
-    // A bare local time is refused: an instant nobody can place is worse than a loud failure.
-    expect(() => normalizeRoutines([{ ...ROUTINE, at: '2026-09-25T09:00:00' }])).toThrow(/.at must be RFC 3339/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, everySeconds: 60, anchorAt: 'tomorrow' }])).toThrow(/.anchorAt must be RFC 3339/)
-    expect(() => normalizeRoutines([{ ...ROUTINE, everySeconds: 60 }, { ...ROUTINE, everySeconds: 60 }])).toThrow(/declared twice/)
+    expect(() => normalizeRoutines([{ ...ROUTINE, name: 'bad name' }], 'routines', FIXED)).toThrow(/.name must match/)
+    expect(() => normalizeRoutines([{ ...ROUTINE, name: '-leading' }], 'routines', FIXED)).toThrow(/.name must match/)
+    expect(() => normalizeRoutines([{ ...ROUTINE, member: '   ' }], 'routines', FIXED)).toThrow(/.member must be a Member handle or id/)
+    expect(() => normalizeRoutines([{ ...ROUTINE, prompt: '' }], 'routines', FIXED)).toThrow(/.prompt must be a non-empty instruction/)
+    expect(() => normalizeRoutines([{ ...ROUTINE, summary: ' ' }], 'routines', FIXED)).toThrow(/.summary must be a non-empty string/)
+    expect(() => normalizeRoutines([{ ...ROUTINE, once: 'yes' }], 'routines', FIXED)).toThrow(/.once must be a boolean/)
+    expect(() => normalizeRoutines([{ ...ROUTINE }, { ...ROUTINE }], 'routines', FIXED)).toThrow(/declared twice/)
+    // A cron field is validated here, and the rejection names the row's own field.
+    expect(() => normalizeRoutines([{ ...ROUTINE, cron: '0 9 * *' }], 'routines', FIXED)).toThrow(/routines\[0\]\.cron '0 9 \* \*' must have five fields/)
+    expect(() => normalizeRoutines([{ name: 'x', member: 'y', prompt: 'z' } as never], 'routines', FIXED)).toThrow(/routines\[0\]\.cron must be a non-empty string/)
+  })
+
+  it('refuses the interval and instant triggers it used to accept, naming the replacement', () => {
+    for (const legacy of [{ everySeconds: 3600 }, { at: '2026-09-25T09:00:00Z' }, { anchorAt: '2026-09-25T09:00:00Z' }]) {
+      const entry = { ...ROUTINE, ...legacy }
+      expect(() => normalizeRoutines([entry], 'routines', FIXED)).toThrow(/is no longer supported: a routine's trigger is one five-field cron expression/)
+      // The field that has to go is the one named, not whichever the loop reaches first.
+      const [field] = Object.keys(legacy)
+      expect(() => normalizeRoutines([entry], 'routines', FIXED)).toThrow(new RegExp(`routines\\[0\\]\\.${field} is no longer supported`))
+    }
+  })
+
+  it('refuses an expression that can never fire, because silence is the one failure nobody sees', () => {
+    expect(() => normalizeRoutines([{ ...ROUTINE, cron: '0 0 30 2 *' }], 'routines', FIXED))
+      .toThrow(/routines\[0\]\.cron '0 0 30 2 \*' never fires within five years in zone 'UTC'/)
+    // The leap-day expression is the near miss: it fires, just rarely.
+    expect(normalizeRoutines([{ ...ROUTINE, cron: '0 0 29 2 *' }], 'routines', FIXED)[0]?.cron).toBe('0 0 29 2 *')
   })
 
   it('addresses a target by branded id or by handle', () => {
@@ -72,47 +87,40 @@ describe('routine configuration', () => {
 describe('routine occurrences', () => {
   const start = Date.parse('2026-09-25T00:00:00Z')
 
-  it('arms an unanchored interval one interval after the first arming', () => {
-    expect(nextRoutineOccurrence(routine({ everySeconds: 60 }), start)).toBe(start + 60_000)
+  it('reads the next fire off the expression, in the zone it is given', () => {
+    expect(nextRoutineOccurrence(routine(), start, 'UTC')).toBe(Date.parse('2026-09-25T00:15:00Z'))
+    expect(nextRoutineOccurrence(routine({ cron: '30 9 * * 1' }), start, 'UTC')).toBe(Date.parse('2026-09-28T09:30:00Z'))
+    // The same wall-clock reading is a different instant in another zone.
+    expect(nextRoutineOccurrence(routine({ cron: '30 9 * * *' }), start, 'Asia/Tokyo')).toBe(Date.parse('2026-09-25T00:30:00Z'))
   })
 
-  it('keeps a configured phase, and the same phase after a restart', () => {
-    const anchorAt = start - 30_000
-    const anchored = routine({ everySeconds: 3600, anchorAt })
-    expect(nextRoutineOccurrence(anchored, start)).toBe(start + 3_570_000)
-    // A restart hours later re-derives the same grid instead of drifting by the downtime.
-    const later = start + 5 * 3600_000 + 1234
-    const expected = anchorAt + Math.floor((later - anchorAt) / 3600_000) * 3600_000 + 3600_000
-    expect(nextRoutineOccurrence(anchored, later)).toBe(expected)
+  it('lands on the same phase however long the Host was down', () => {
+    const every = routine({ cron: '0 * * * *' })
+    const first = nextRoutineOccurrence(every, start, 'UTC')!
+    // A Host that missed hours of fires still arms the next top of the hour,
+    // because the expression is the phase — nothing drifts with the downtime.
+    const later = Date.parse('2026-09-25T05:17:00Z')
+    expect(first).toBe(Date.parse('2026-09-25T01:00:00Z'))
+    expect(nextRoutineOccurrence(every, later, 'UTC')).toBe(Date.parse('2026-09-25T06:00:00Z'))
   })
 
-  it('waits for a future anchor', () => {
-    const anchorAt = start + 90_000
-    expect(nextRoutineOccurrence(routine({ everySeconds: 60, anchorAt }), start)).toBe(anchorAt)
+  it('fires a `once` routine at its next occurrence, and then no more', () => {
+    const single = routine({ cron: '30 9 * * *', once: true })
+    expect(nextRoutineOccurrence(single, start, 'UTC')).toBe(Date.parse('2026-09-25T09:30:00Z'))
+    expect(isRepeatingRoutine(single)).toBe(false)
   })
 
-  it('fires a one-shot once, and reports a spent instant as unarmable', () => {
-    const future = routine({ at: start + 1_000 })
-    expect(nextRoutineOccurrence(future, start)).toBe(start + 1_000)
-    expect(nextRoutineOccurrence(future, start + 999)).toBe(start + 1_000)
-    // Strictly after: at the instant it is due there is no *next* occurrence left.
-    expect(nextRoutineOccurrence(future, start + 1_000)).toBeUndefined()
-    expect(nextRoutineOccurrence(future, start + 1_001)).toBeUndefined()
-    expect(nextRoutineOccurrence(routine({ at: start, once: true }), start)).toBeUndefined()
-  })
-
-  it('repeats an interval unless it is declared once', () => {
-    expect(isRepeatingRoutine(routine({ everySeconds: 60 }))).toBe(true)
-    expect(isRepeatingRoutine(routine({ everySeconds: 60, once: true }))).toBe(false)
-    expect(isRepeatingRoutine(routine({ at: start }))).toBe(false)
+  it('repeats an expression unless it is declared once', () => {
+    expect(isRepeatingRoutine(routine())).toBe(true)
+    expect(isRepeatingRoutine(routine({ once: true }))).toBe(false)
   })
 })
 
 describe('routine framing', () => {
-  it('states the unattended origin, the Team instant, and the instruction', () => {
+  it('states the unattended origin, the Team instant, the expression, and the instruction', () => {
     const firedAt = Date.parse('2026-09-25T04:00:00Z')
     const body = routineBody(routine(), firedAt)
-    expect(body.split('\n')[0]).toBe('[ROUTINE FIRE] model-bump-check — fired 2026-09-25T12:00:00+08:00')
+    expect(body.split('\n')[0]).toBe("[ROUTINE FIRE] model-bump-check — fired 2026-09-25T12:00:00+08:00 (cron '*/15 * * * *')")
     expect(body).toMatch(/unattended scheduled routine started by the Agent Team Host/)
     expect(body).toMatch(/nobody is waiting in this conversation for a reply/)
     expect(body.endsWith('\ncheck the model catalog')).toBe(true)

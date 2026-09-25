@@ -1,7 +1,8 @@
 # Routines created from the Team GUI — confirmed scope
 
-Written 2026-09-25, updated twice the same day: first after the Human redirected the UI shape and asked for
-agent-created routines, then after they narrowed the feature to waking a Member. This is the decision snapshot;
+Written 2026-09-25, updated the same day: first after the Human redirected the UI shape and asked for
+agent-created routines, then after they narrowed the feature to waking a Member, and once more when they made the
+trigger cron-only (「全部cron式に。cron式のみにしてシンプルに管理したい」). This is the decision snapshot;
 where it and `packages/` disagree, the code wins.
 
 ## Withdrawn later the same day: the `post` action
@@ -26,7 +27,8 @@ was made and then withdrawn. Nothing was lost in the real environment, which hel
 - `wake` is now the engine's only lane, and it is what the GUI creates as well as what an operator's
   `config.routines` may declare. It is the natural action for an *agent-created* routine ("every morning, check the
   catalog") precisely because no ledger artifact and no impersonation are involved.
-- The schedule is one trigger: `everySeconds` (integer ≥ 60, phased from `anchorAt`) or one absolute RFC 3339 `at`.
+- The schedule is one trigger: a five-field cron expression, read on the Host's own clock, with `once: true` for a
+  single fire. The earlier interval/anchor/instant forms were withdrawn the next day — see [issue 05](issues/05-cron-only-trigger.md).
 
 ## UI placement — resolved
 

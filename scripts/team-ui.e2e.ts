@@ -2138,6 +2138,19 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await routineCreate.locator('select').selectOption(routineTarget.memberId)
   await routineCreate.getByLabel('名称').fill('nightly-check')
   await routineCreate.getByLabel('指令').fill('ROUTINE-MARKER 检查模型目录有没有变化')
+  // The trigger is one cron expression, and the editor reads it with the Host's
+  // own parser before anything is sent: a grammar the Host would refuse is named
+  // here, and a readable expression previews its next three fires.
+  const cronInput = routineCreate.getByLabel('cron 表达式')
+  await cronInput.fill('every 3600 seconds')
+  await expect.poll(async () => await routineCreate.locator('[class*="firesInvalid"]').textContent()).toContain('这个 cron 表达式读不出来')
+  expect(scaffold.ctx.agentTeam.routines({ workspaceId: inboxWorkspace.id }).routines).toHaveLength(0)
+  await cronInput.fill('0 9 * * *')
+  await expect.poll(async () => await routineCreate.locator('[class*="fires"] li').count()).toBe(3)
+  expect(await routineCreate.locator('[class*="cronHint"]').textContent()).toContain('五个字段')
+  // The preview is computed in the Host's zone, so the reader is told which one.
+  const hostZone = new Intl.DateTimeFormat().resolvedOptions().timeZone
+  expect(await routineCreate.locator('[class*="cronZone"]').textContent()).toContain(`按 Host 所在时区（${hostZone}）`)
   await routineCreate.getByRole('button', { name: '保存' }).click()
   await expect.poll(async () => await page.getByRole('dialog').count()).toBe(0)
   const routineRow = routinePage.locator('article').filter({ hasText: 'nightly-check' })
@@ -2145,8 +2158,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const routineText = await routineRow.textContent()
   expect(routineText).toContain(`唤醒 @${routineTarget.handle}`)
   expect(routineText).toContain('ROUTINE-MARKER')
-  expect(routineText).toContain('每 3600 秒')
-  expect(routineText).toContain('持续重复')
+  // The card carries the expression as written rather than a rendering of it —
+  // that is the string the operator edits — beside the next fire it produces.
+  expect(routineText).toContain('cron 0 9 * * *')
+  expect(routineText).toContain('每次到点都触发')
+  expect(routineText).toContain('下次')
   // A stored routine is editable; the row says where it came from.
   expect(await routineRow.getAttribute('data-origin')).toBe('store')
   expect(await routineRow.getByRole('button', { name: '编辑' }).count()).toBe(1)
@@ -2160,24 +2176,27 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     origin: 'store',
     declaration: {
       name: 'nightly-check', member: routineTarget.memberId,
-      prompt: 'ROUTINE-MARKER 检查模型目录有没有变化', once: false, everySeconds: 3600,
+      prompt: 'ROUTINE-MARKER 检查模型目录有没有变化', once: false, cron: '0 9 * * *',
     },
   })
   await page.screenshot({ path: join(UI10_SHOTS, 'routines-created-desktop.png'), fullPage: true })
 
   // The name is the identity, so an edit keeps it fixed and upserts in place: one
-  // routine still, and the changed instruction is the one now stored.
+  // routine still, and the changed instruction and expression are what is stored.
   await routineRow.getByRole('button', { name: '编辑' }).click()
   const routineEdit = page.getByRole('dialog', { name: '编辑定时任务' })
   await routineEdit.waitFor()
   expect(await routineEdit.getByLabel('名称').isDisabled()).toBe(true)
   await routineEdit.getByLabel('指令').fill('ROUTINE-MARKER-EDITED 改成检查发布分支')
+  await routineEdit.getByLabel('cron 表达式').fill('30 18 * * fri')
   await routineEdit.getByRole('button', { name: '保存' }).click()
   await expect.poll(async () => await page.getByRole('dialog').count()).toBe(0)
   await expect.poll(async () => await routineRow.textContent()).toContain('ROUTINE-MARKER-EDITED')
+  await expect.poll(async () => await routineRow.textContent()).toContain('cron 30 18 * * fri')
   const editedRoutine = scaffold.ctx.agentTeam.routines({ workspaceId: inboxWorkspace.id }).routines
   expect(editedRoutine).toHaveLength(1)
   expect(editedRoutine[0]!.declaration.prompt).toBe('ROUTINE-MARKER-EDITED 改成检查发布分支')
+  expect(editedRoutine[0]!.declaration.cron).toBe('30 18 * * fri')
 
   // The 390 face: the schedule and its row stay inside the viewport, and the entry
   // is the rail's second icon because the wide card is not drawn there.

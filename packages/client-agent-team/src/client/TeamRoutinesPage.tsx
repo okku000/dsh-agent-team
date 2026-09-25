@@ -12,9 +12,10 @@ import type {
   AgentTeamSaveRoutineRequest,
   AgentTeamSaveRoutineResult,
 } from '@wowyuarm/dsh-agent-team/types'
+import { cronTimeZone, nextCronOccurrences, parseCronExpression } from '@wowyuarm/dsh-agent-team/cron'
 import { Button, Checkbox, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
-import { formatAbsoluteTime, formatInboxTime } from './team-formatters.ts'
+import { formatAbsoluteTime, formatInboxTime, formatZonedTime } from './team-formatters.ts'
 import createCss from './create.module.css'
 import css from './conversation.module.css'
 import routinesCss from './routines.module.css'
@@ -56,6 +57,8 @@ export function TeamRoutinesPage({ useWorkspaces, loadRoutines, saveRoutine, del
   /** The authorizing fence; `undefined` means the Host has no Workspace to answer through yet. */
   const authorization = workspaces[0]?.workspaceId
   const [routines, setRoutines] = useState<readonly AgentTeamRoutine[]>()
+  /** The zone the Host reads every expression in; every instant shown here is the Host's, not the browser's. */
+  const [zone, setZone] = useState<string>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
@@ -76,6 +79,7 @@ export function TeamRoutinesPage({ useWorkspaces, loadRoutines, saveRoutine, del
       return
     }
     setRoutines(result.value.routines)
+    setZone(result.value.zone)
     setError(undefined)
     setLoading(false)
   }, [authorization, loadRoutines])
@@ -140,6 +144,7 @@ export function TeamRoutinesPage({ useWorkspaces, loadRoutines, saveRoutine, del
               {routines.map(routine => <RoutineCard
                 key={routine.name}
                 routine={routine}
+                zone={cronTimeZone(zone)}
                 handle={routine.declaration.member === undefined ? undefined : byId.get(routine.declaration.member)?.member.handle}
                 t={t}
                 onEdit={() => { setEditor({ routine }) }}
@@ -151,6 +156,7 @@ export function TeamRoutinesPage({ useWorkspaces, loadRoutines, saveRoutine, del
     </div>
     {editor !== undefined && <RoutineEditor
       {...(editor.routine === undefined ? {} : { routine: editor.routine })}
+      zone={cronTimeZone(zone)}
       members={members}
       onClose={() => { setEditor(undefined) }}
       save={async declaration => {
@@ -188,8 +194,9 @@ export function TeamRoutinesPage({ useWorkspaces, loadRoutines, saveRoutine, del
  * an operator's own `config.routines` declaration belongs to their profile
  * file, and offering an edit the Host would refuse is worse than saying so.
  */
-function RoutineCard({ routine, handle, t, onEdit, onDelete }: {
+function RoutineCard({ routine, zone, handle, t, onEdit, onDelete }: {
   readonly routine: AgentTeamRoutine
+  readonly zone: string
   readonly handle: string | undefined
   readonly t: TeamConversationProps['t']
   readonly onEdit: () => void
@@ -208,7 +215,7 @@ function RoutineCard({ routine, handle, t, onEdit, onDelete }: {
         <Button size="sm" variant="outline" onClick={onDelete}>{t('routinesDelete')}</Button>
       </span>}
     </div>
-    <span className={routinesCss.trigger}>{describeTrigger(declaration, t)}</span>
+    <span className={routinesCss.trigger}>{describeTrigger(declaration, zone, t)}</span>
     {/* The wake target is what a routine is FOR, so it speaks in the schedule's
         own ink and carries the handle the roster knows rather than the id the
         store holds; a target the roster no longer has falls back to the
@@ -229,8 +236,9 @@ function RoutineCard({ routine, handle, t, onEdit, onDelete }: {
  * validate what the Host validates before the save is attempted, so a refusal
  * that is the reader's to fix is answered here instead of as a remote error.
  */
-function RoutineEditor({ routine, members, onClose, save, t }: {
+function RoutineEditor({ routine, zone, members, onClose, save, t }: {
   readonly routine?: AgentTeamRoutine
+  readonly zone: string
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly onClose: () => void
   readonly save: (declaration: RoutineDeclaration) => Promise<string | undefined>
@@ -241,17 +249,20 @@ function RoutineEditor({ routine, members, onClose, save, t }: {
   const [member, setMember] = useState(declaration?.member ?? members[0]?.member.memberId ?? '')
   const [prompt, setPrompt] = useState(declaration?.prompt ?? '')
   const [summary, setSummary] = useState(declaration?.summary ?? '')
-  const [trigger, setTrigger] = useState<'everySeconds' | 'at'>(declaration?.at === undefined ? 'everySeconds' : 'at')
-  const [everySeconds, setEverySeconds] = useState(declaration?.everySeconds === undefined ? '3600' : String(declaration.everySeconds))
-  const [at, setAt] = useState(declaration?.at ?? '')
-  const [anchorAt, setAnchorAt] = useState(declaration?.anchorAt ?? '')
+  const [cron, setCron] = useState(declaration?.cron ?? '')
   const [once, setOnce] = useState(declaration?.once === true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
 
+  // The draft's own answer, from the module the Host arms from: the reader sees
+  // the fires this expression would actually keep, in the Host's zone, before
+  // anything is saved. An unfinished expression is not an error here — it is
+  // simply not answered yet — so only a parse or a never-fires refusal speaks.
+  const preview = describeDraftFires(cron, zone, t)
+
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    const parsed = validate({ name, member, prompt, summary, trigger, everySeconds, at, anchorAt, once }, t)
+    const parsed = validate({ name, member, prompt, summary, cron, once }, zone, t)
     if (typeof parsed === 'string') {
       setError(parsed)
       return
@@ -295,57 +306,35 @@ function RoutineEditor({ routine, members, onClose, save, t }: {
         <span>{t('routinesSummary')}</span>
         <Input className={createCss.input!} value={summary} placeholder={t('routinesSummaryPlaceholder')} disabled={saving} onChange={event => { setSummary(event.target.value) }} />
       </label>
-      <div className={createCss.field}>
-        <span>{t('routinesTrigger')}</span>
-        <div className={routinesCss.radios}>
-          <label className={routinesCss.radio}>
-            <input type="radio" name="team-routine-trigger" checked={trigger === 'everySeconds'} disabled={saving} onChange={() => { setTrigger('everySeconds') }} />
-            <span>{t('routinesTriggerRepeat')}</span>
-          </label>
-          <label className={routinesCss.radio}>
-            <input type="radio" name="team-routine-trigger" checked={trigger === 'at'} disabled={saving} onChange={() => { setTrigger('at') }} />
-            <span>{t('routinesTriggerOnce')}</span>
-          </label>
-        </div>
-      </div>
-      {trigger === 'everySeconds'
-        ? <>
-            <div className={routinesCss.pair}>
-              <label className={createCss.field}>
-                <span>{t('routinesEverySeconds')}</span>
-                <Input className={createCss.input!} value={everySeconds} inputMode="numeric" disabled={saving} onChange={event => { setEverySeconds(event.target.value) }} />
-              </label>
-              <label className={createCss.field}>
-                <span>{t('routinesAnchorAt')}</span>
-                <Input className={createCss.input!} value={anchorAt} placeholder={t('routinesInstantPlaceholder')} disabled={saving} onChange={event => { setAnchorAt(event.target.value) }} />
-              </label>
-            </div>
-            <Checkbox checked={once} disabled={saving} label={t('routinesStopAfterFirst')} onChange={setOnce} />
-          </>
-        : <label className={createCss.field}>
-            <span>{t('routinesAt')}</span>
-            <Input className={createCss.input!} value={at} placeholder={t('routinesInstantPlaceholder')} disabled={saving} onChange={event => { setAt(event.target.value) }} />
-          </label>}
+      <label className={createCss.field}>
+        <span>{t('routinesCron')}</span>
+        <Input className={createCss.input!} value={cron} placeholder={t('routinesCronPlaceholder')} disabled={saving} onChange={event => { setCron(event.target.value) }} />
+      </label>
+      <p className={routinesCss.cronHint}>{t('routinesCronHint')}</p>
+      <p className={routinesCss.cronZone}>{t('routinesZone', { zone })}</p>
+      {'error' in preview
+        ? <p className={routinesCss.firesInvalid}>{preview.error}</p>
+        : preview.fires.length > 0 && <>
+            <span className={routinesCss.firesLabel}>{t('routinesNextFires')}</span>
+            <ul className={routinesCss.fires}>{preview.fires.map(fire => <li key={fire}>{fire}</li>)}</ul>
+          </>}
+      <Checkbox checked={once} disabled={saving} label={t('routinesStopAfterFirst')} onChange={setOnce} />
       {error !== undefined && <p className={createCss.error} role="alert">{error}</p>}
     </form>
   </Modal>
 }
 
-/** RFC 3339 with an explicit offset or `Z`; a bare local time is refused by the Host too. */
-const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
-/** Mirrors the Host's own floor, so the reader is told before the round trip. */
-const MIN_INTERVAL_SECONDS = 60
+
+/** How many fires the editor shows for the expression being written. */
+const PREVIEW_FIRES = 3
 
 interface RoutineDraft {
   readonly name: string
   readonly member: string
   readonly prompt: string
   readonly summary: string
-  readonly trigger: 'everySeconds' | 'at'
-  readonly everySeconds: string
-  readonly at: string
-  readonly anchorAt: string
+  readonly cron: string
   readonly once: boolean
 }
 
@@ -354,46 +343,74 @@ interface RoutineDraft {
  * declaration to save or the message to show. It mirrors the Host's rules
  * rather than replacing them: the save still sends the result, and anything the
  * Host refuses comes back as the Host's own reason.
+ *
+ * The expression is read with the Host's own module and in the Host's own zone,
+ * so the only two refusals this can produce — unparsable, and never fires — are
+ * exactly the two the Host would produce for the same string.
  */
-function validate(draft: RoutineDraft, t: TeamConversationProps['t']): RoutineDeclaration | string {
+function validate(draft: RoutineDraft, zone: string, t: TeamConversationProps['t']): RoutineDeclaration | string {
   if (!NAME_PATTERN.test(draft.name)) return t('routinesErrorName')
   if (draft.member.trim() === '') return t('routinesErrorMember')
   if (draft.prompt.trim() === '') return t('routinesErrorPrompt')
-  if (draft.trigger === 'everySeconds') {
-    const seconds = Number(draft.everySeconds)
-    if (!Number.isInteger(seconds) || seconds < MIN_INTERVAL_SECONDS) return t('routinesErrorInterval')
-    if (draft.anchorAt.trim() !== '' && !INSTANT_PATTERN.test(draft.anchorAt.trim())) return t('routinesErrorInstant')
-    return {
-      name: draft.name,
-      member: draft.member,
-      prompt: draft.prompt.trim(),
-      ...(draft.summary.trim() === '' ? {} : { summary: draft.summary.trim() }),
-      once: draft.once,
-      everySeconds: seconds,
-      ...(draft.anchorAt.trim() === '' ? {} : { anchorAt: draft.anchorAt.trim() }),
-    }
+  const cron = draft.cron.trim()
+  if (cron === '') return t('routinesErrorCron')
+  let source: string
+  try {
+    source = parseCronExpression(cron).source
+  } catch (error) {
+    return t('routinesCronInvalid', { message: error instanceof Error ? error.message : String(error) })
   }
-  if (!INSTANT_PATTERN.test(draft.at.trim())) return t('routinesErrorInstant')
+  if (nextCronOccurrences(parseCronExpression(source), Date.now(), 1, zone).length === 0) return t('routinesCronNeverFires')
   return {
     name: draft.name,
     member: draft.member,
     prompt: draft.prompt.trim(),
     ...(draft.summary.trim() === '' ? {} : { summary: draft.summary.trim() }),
-    once: false,
-    at: draft.at.trim(),
+    once: draft.once,
+    cron: source,
   }
 }
 
 /**
- * One routine's schedule in the reader's terms. The declaration keeps an
- * instant as the absolute string it was written as, so the line repeats that
- * rather than re-localizing it: a reader who wrote `+09:00` sees the instant
- * they meant, and one who wrote `Z` sees that.
+ * The fires one draft expression would keep, or the reason it cannot be read.
+ *
+ * This is the whole point of sharing one parser with the Host: the reader is not
+ * shown a second opinion about what an expression means. An empty draft is
+ * unanswered rather than wrong, so the editor stays quiet until there is
+ * something to read.
  */
-function describeTrigger(declaration: RoutineDeclaration, t: TeamConversationProps['t']): string {
-  if (declaration.at !== undefined) return t('routinesAtSummary', { at: declaration.at })
-  const parts = [t('routinesEverySummary', { seconds: declaration.everySeconds ?? 0 })]
-  if (declaration.anchorAt !== undefined) parts.push(t('routinesAnchorSummary', { at: declaration.anchorAt }))
-  parts.push(declaration.once ? t('routinesOnceSummary') : t('routinesRepeatSummary'))
+function describeDraftFires(cron: string, zone: string, t: TeamConversationProps['t']): { readonly fires: readonly string[] } | { readonly error: string } {
+  const text = cron.trim()
+  if (text === '') return { fires: [] }
+  try {
+    const expression = parseCronExpression(text)
+    const fires = nextCronOccurrences(expression, Date.now(), PREVIEW_FIRES, zone)
+    if (fires.length === 0) return { error: t('routinesCronNeverFires') }
+    return { fires: fires.map(instant => formatZonedTime(instant, zone)) }
+  } catch (error) {
+    return { error: t('routinesCronInvalid', { message: error instanceof Error ? error.message : String(error) }) }
+  }
+}
+
+/**
+ * One routine's schedule in the reader's terms: the expression as written —
+ * never a rendering of it, because that is what the operator edits — the two
+ * things `once` can mean, and the next fire in the Host's own zone.
+ */
+function describeTrigger(declaration: RoutineDeclaration, zone: string, t: TeamConversationProps['t']): string {
+  const parts = [`cron ${declaration.cron}`, declaration.once ? t('routinesOnceSummary') : t('routinesRepeatSummary')]
+  const next = nextFire(declaration.cron, zone)
+  if (next !== undefined) parts.push(t('routinesNextFire', { at: formatZonedTime(next, zone) }))
   return parts.join(' · ')
+}
+
+/** The next fire of an expression already accepted by the Host, or undefined. */
+function nextFire(cron: string, zone: string): number | undefined {
+  try {
+    return nextCronOccurrences(parseCronExpression(cron), Date.now(), 1, zone)[0]
+  } catch {
+    // A card renders what the Host reported; an expression this build cannot
+    // read is still a routine, so the line simply carries no next fire.
+    return undefined
+  }
 }

@@ -295,6 +295,37 @@ export function formatAbsoluteTime(occurredAt: string): string {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
 }
 
+/** One formatter per zone: a routine card renders a next fire for every row. */
+const zonedFormatters = new Map<string, Intl.DateTimeFormat>()
+
+/**
+ * Absolute `YYYY-MM-DD HH:mm` label of one instant **as a named zone reads it**.
+ *
+ * A cron expression names a wall-clock reading in the zone the Host evaluates it
+ * in, so a next-fire line has to be rendered in that zone — the reader's own
+ * zone would name an instant the Host is not going to fire at. The label keeps
+ * the same numeric shape as {@link formatAbsoluteTime} rather than following the
+ * interface language, because a schedule is read as a value, not as prose.
+ */
+export function formatZonedTime(instantMs: number, timeZone: string): string {
+  let formatter = zonedFormatters.get(timeZone)
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    zonedFormatters.set(timeZone, formatter)
+  }
+  const parts: Record<string, string> = {}
+  for (const part of formatter.formatToParts(new Date(instantMs))) parts[part.type] = part.value
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
+}
+
 /**
  * Wall-clock label for one Message instant: time within the current day,
  * month-day time within the year, full date otherwise.

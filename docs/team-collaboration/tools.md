@@ -50,11 +50,11 @@ A committed mutation names its action (Claim created, completed, or released), r
 
 ## `team_routine`
 
-`team_routine` is the Host's own schedule, not a Session's: `list` answers what fires while nobody is talking, `save` creates or upserts one routine by name, and `delete` removes it. A routine does exactly one thing and declares exactly one trigger — `everySeconds` (an integer of at least 60, aligned to `anchorAt` when given) or one absolute RFC 3339 `at`. The name is the identity, so a save replaces in place and neither mutation needs a revision token: this is configuration, not a ledger fact.
+`team_routine` is the Host's own schedule, not a Session's: `list` answers what fires while nobody is talking, `save` creates or upserts one routine by name, and `delete` removes it. A routine does exactly one thing and declares exactly one trigger — a five-field cron expression read on the Host's own clock, which the listing reports the zone of, with `once` to stop after the first fire. The name is the identity, so a save replaces in place and neither mutation needs a revision token: this is configuration, not a ledger fact.
 
 Every routine wakes one Member and nothing else: it injects `prompt` into that Member's own Session, so only an activated Member with a live session can be fired at. A routine cannot speak for anybody — it commits nothing to the Team, and what it starts is that Member's turn rather than a Message. `summary` is the one-line account the notice carries.
 
-Every stored routine records who saved it and when, and that attribution renders on the routine's own line. An entry the operator declared in the profile's own `config.routines` reports origin `config` and cannot be saved over or deleted through the tool. A declaration the Host cannot run is refused whole with the reason, and the routines already running stay as they were; a successful save needs no restart, because the running Host re-arms the schedule when the store changes.
+Every stored routine records who saved it and when, and that attribution renders on the routine's own line. An entry the operator declared in the profile's own `config.routines` reports origin `config` and cannot be saved over or deleted through the tool. A declaration the Host cannot run is refused whole with the reason — a legacy trigger field, a macro, a six-field form, or an expression that never comes round — and the routines running stay as they were; a successful save needs no restart, because the running Host re-arms the schedule when the store changes.
 
 ## `context_rollover`
 

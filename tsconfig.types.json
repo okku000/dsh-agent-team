@@ -47,6 +47,9 @@
       "@wowyuarm/dsh-agent-team/member-skills": [
         "./packages/agent-team/src/member-skills.ts"
       ],
+      "@wowyuarm/dsh-agent-team/cron": [
+        "./packages/agent-team/src/cron-expression.ts"
+      ],
       "@wowyuarm/dsh-agent-team/tools": [
         "./packages/tool-agent-team/src/index.ts"
       ],

@@ -10,7 +10,7 @@
 
 侧栏行自带控件：行级 ⋯ 菜单打开对应编辑器——`updateChannel` 修改频道名称/说明；`updateMember` 编辑 Agent 名称/说明，并可为该成员固定可选的 provider/model（缺省即清除覆盖、回到 Host 默认继承；对活跃成员改模型会原地更新 live model selection，保持 Agent 与 Session 身份不变，后续请求使用新选择）。模型选择经与会话无关的 `llm.models` RPC 读取 Host 目录。点击 Agent 卡片会在 Team 模式内临时显示该成员的会话，不会丢掉下层已选中的 Channel 或 Thread。两种行菜单都带 danger「归档」入口：`archiveMember` 与 `archiveChannel` 经破坏性确认弹窗（明确说明"暂无恢复入口"）后把实体从所有面收起（持久数据保留、活跃 Claim 释放）；归档行随 workspace 刷新消失，mention 候选、成员选择器与频道成员列表都排除已归档成员。本轮不做侧栏归档列表与恢复入口。
 
-定时任务页是上述 Inbox 入口的同胞，侧栏与会话座位两处都如此。它列出 Host 的整份排程——不论来源是哪一种——逐条给出触发方式、要唤醒的 Agent Member、注入的指令，以及是谁保存的；store 里的条目也在这个页面上经 `saveRoutine`、`deleteRoutine` 新建、编辑和删除。页面在打开时、以及自己改动之后重读 `routines`，因为保存一条定时任务是 Host 配置而不是 ledger fact，不产生任何 Team `changes` 事件。这些调用上的 Workspace 是栅栏而不是作用域：Host 对任何绑定了「存在的工作区」的调用者都返回整份排程，所以页面只用第一个可见 Workspace 读一次，而不是按 Workspace 合并切片；唤醒目标取自全局 Member 名册，而不是某个 Workspace 的行。操作者在 profile 自己的 `config.routines` 里声明的条目会被列出并标注来源，且不提供编辑与删除。页面展示的是排程而不是触发结果：目前没有任何 Remote 读 Host 的 fire log。
+定时任务页是上述 Inbox 入口的同胞，侧栏与会话座位两处都如此。它列出 Host 的整份排程——不论来源是哪一种——逐条给出它触发的 cron 表达式与由此算出的下一次触发、要唤醒的 Agent Member、注入的指令，以及是谁保存的；store 里的条目也在这个页面上经 `saveRoutine`、`deleteRoutine` 新建、编辑和删除。页面在打开时、以及自己改动之后重读 `routines`，因为保存一条定时任务是 Host 配置而不是 ledger fact，不产生任何 Team `changes` 事件。这些调用上的 Workspace 是栅栏而不是作用域：Host 对任何绑定了「存在的工作区」的调用者都返回整份排程，所以页面只用第一个可见 Workspace 读一次，而不是按 Workspace 合并切片；唤醒目标取自全局 Member 名册，而不是某个 Workspace 的行。操作者在 profile 自己的 `config.routines` 里声明的条目会被列出并标注来源，且不提供编辑与删除。页面展示的是排程而不是触发结果：目前没有任何 Remote 读 Host 的 fire log。
 
 Client 使用以下 Host 接口：
 

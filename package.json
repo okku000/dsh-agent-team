@@ -121,6 +121,10 @@
       "types": "./packages/agent-team/lib/types/member-time-context.d.ts",
       "default": "./packages/agent-team/lib/member-time-context.js"
     },
+    "./cron": {
+      "types": "./packages/agent-team/lib/types/cron-expression.d.ts",
+      "default": "./packages/agent-team/lib/cron-expression.js"
+    },
     "./routines": {
       "types": "./packages/agent-team/lib/types/routines.d.ts",
       "default": "./packages/agent-team/lib/routines.js"

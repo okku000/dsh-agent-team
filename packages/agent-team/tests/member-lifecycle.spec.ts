@@ -4501,34 +4501,40 @@ describe('an Agent Member schedules a routine', () => {
     // "Every morning, wake me and check this" — the Member says it, the routine
     // belongs to it, and the fire lands in a Member's own Session.
     const saved = await call('routine-save', { action: 'save', workspace: workspaceId, name: 'standup',
-      member: 'scheduler', prompt: 'report your progress', everySeconds: 3600 })
+      member: 'scheduler', prompt: 'report your progress', cron: '0 * * * *' })
     expect(saved.created).toBe(true)
     expect(saved.routine).toMatchObject({ name: 'standup', origin: 'store' })
     expect(saved.routine.createdBy).toMatchObject({ kind: 'member', memberId: added.status.member.memberId, handle: 'scheduler' })
     expect(readStoredRoutines(routineStorePath())).toMatchObject([{ name: 'standup', prompt: 'report your progress', createdBy: { handle: 'scheduler' } }])
 
     const listed = await call('routine-list', { action: 'list', workspace: workspaceId })
-    expect(listed.routines).toMatchObject([{ name: 'standup', member: 'scheduler', prompt: 'report your progress', trigger: 'everySeconds' }])
+    expect(listed.routines).toMatchObject([{ name: 'standup', member: 'scheduler', prompt: 'report your progress', cron: '0 * * * *' }])
+    // The listing names the zone the expression is read in, so the Member that
+    // scheduled it (or a Client previewing it) can tell what a fire means.
+    expect(listed.zone).toBe(new Intl.DateTimeFormat().resolvedOptions().timeZone)
 
     // A Member schedules only in a Workspace it participates in.
     const foreign = WorkspaceId('workspace:routine-foreign')
     workspaces.set(foreign, { id: foreign, path: join(root, 'foreign-project'), attachSession: async () => {} })
     const refused = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('routine-foreign'),
-      name: 'team_routine', arguments: { action: 'save', workspace: foreign, name: 'elsewhere', member: 'scheduler', prompt: 'check', everySeconds: 60 }, agent })
+      name: 'team_routine', arguments: { action: 'save', workspace: foreign, name: 'elsewhere', member: 'scheduler', prompt: 'check', cron: '* * * * *' }, agent })
     expect(refused.isError).toBe(true)
     if (!refused.isError) throw new Error('Expected the foreign Workspace to be refused')
     expect(refused.error.message).toContain('Not participating in Workspace')
     // The tool resolves the Workspace before it reaches the Host, and the Host
     // refuses it again on its own: neither layer trusts the other's fence.
     expect(() => ctx.agentTeam.saveRoutineForAgent(agent, { workspaceId: foreign,
-      routine: { name: 'elsewhere', member: 'scheduler', prompt: 'check', everySeconds: 60 } })).toThrow(/another Workspace/)
+      routine: { name: 'elsewhere', member: 'scheduler', prompt: 'check', cron: '* * * * *' } })).toThrow(/another Workspace/)
 
     // A one-shot the Member schedules while the row is already running fires
-    // without a restart.
+    // without a restart. A cron expression fires on the minute, so this is the
+    // one test that pays wall-clock time for a real unattended wake: it is the
+    // only place a saved routine is followed all the way into a Member's own
+    // Session, and the minute is the granularity the Human asked for.
     await call('routine-save-once', { action: 'save', workspace: workspaceId, name: 'once-report',
-      member: 'scheduler', prompt: 'the nightly build is green', at: new Date(Date.now() + 400).toISOString() })
-    const fired = await waitFor(latestFireRecord, 5000)
-    expect(fired).toMatchObject({ routine: 'once-report', member: 'scheduler', outcome: 'delivered' })
+      member: 'scheduler', prompt: 'the nightly build is green', cron: '* * * * *', once: true })
+    const fired = await waitFor(latestFireRecord, 65_000)
+    expect(fired).toMatchObject({ routine: 'once-report', member: 'scheduler', outcome: 'delivered', once: true })
 
     const deleted = await call('routine-delete', { action: 'delete', workspace: workspaceId, name: 'standup' })
     expect(deleted).toMatchObject({ name: 'standup', removed: true })
@@ -4537,7 +4543,9 @@ describe('an Agent Member schedules a routine', () => {
     // The tool is a Team tool: it belongs to the preset's own roster, which is
     // why the composition above could run it at all.
     expect([...AGENT_TEAM_TOOL_NAMES]).toContain('team_routine')
-  })
+    // Long, because the fire this test waits for is a real one and a cron
+    // expression fires on the minute: the wait is the schedule's own granularity.
+  }, 90_000)
 })
 
 /** Mount the routine producer row the way the loader does, so its effect is the real one. */

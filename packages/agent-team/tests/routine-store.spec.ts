@@ -42,8 +42,8 @@ describe('routine store reads', () => {
     writeFileSync(path, JSON.stringify({
       version: 1,
       routines: [
-        { ...DECLARED, everySeconds: 3600 },
-        { ...DECLARED, name: 'nightly-sweep', at: '2026-09-25T09:00:00+09:00' },
+        { ...DECLARED, cron: '0 * * * *' },
+        { ...DECLARED, name: 'nightly-sweep', cron: '0 9 * * 1' },
       ],
     }))
     const read = readRoutineStore(path, warn)
@@ -61,10 +61,20 @@ describe('routine store reads', () => {
 
   it('warns once and runs nothing when a declaration cannot run', () => {
     mkdirFor(path)
-    writeFileSync(path, JSON.stringify({ version: 1, routines: [{ ...DECLARED, everySeconds: 60, at: '2026-09-25T09:00:00+09:00' }] }))
+    writeFileSync(path, JSON.stringify({ version: 1, routines: [{ ...DECLARED, cron: '0 9 * *' }] }))
     expect(readRoutineStore(path, warn)).toEqual([])
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('unusable')
+  })
+
+  it('refuses a stored declaration that still carries the retired interval trigger', () => {
+    // A store an older build wrote: the read refuses the entry by name rather
+    // than running a routine whose schedule nobody can state any more.
+    mkdirFor(path)
+    writeFileSync(path, JSON.stringify({ version: 1, routines: [{ ...DECLARED, everySeconds: 60 }] }))
+    expect(readRoutineStore(path, warn)).toEqual([])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('no longer supported')
   })
 
   it('refuses a file without a routines list', () => {
@@ -77,24 +87,24 @@ describe('routine store reads', () => {
 
 describe('routine store writes', () => {
   it('creates the directory, round-trips, and leaves no temporary file', () => {
-    const routines: readonly RoutineConfig[] = [{ ...DECLARED, everySeconds: 600 }]
+    const routines: readonly RoutineConfig[] = [{ ...DECLARED, cron: '*/10 * * * *' }]
     writeRoutineStore(path, routines)
     expect(readRoutineStore(path, warn)).toEqual(routines)
     expect(existsSync(routineStoreTemporaryPath(path))).toBe(false)
   })
 
   it('replaces earlier content without leaving half a file', () => {
-    writeRoutineStore(path, [{ ...DECLARED, everySeconds: 600 }])
-    writeRoutineStore(path, [{ ...DECLARED, name: 'nightly-sweep', everySeconds: 86400 }])
+    writeRoutineStore(path, [{ ...DECLARED, cron: '*/10 * * * *' }])
+    writeRoutineStore(path, [{ ...DECLARED, name: 'nightly-sweep', cron: '0 0 * * *' }])
     const written = JSON.parse(readFileSync(path, 'utf8')) as { version: number; routines: readonly RoutineConfig[] }
     expect(written.version).toBe(1)
     expect(written.routines.map(entry => entry.name)).toEqual(['nightly-sweep'])
   })
 
   it('rejects a declaration the Host cannot run and leaves the file intact', () => {
-    writeRoutineStore(path, [{ ...DECLARED, everySeconds: 600 }])
+    writeRoutineStore(path, [{ ...DECLARED, cron: '*/10 * * * *' }])
     const before = readFileSync(path, 'utf8')
-    expect(() => writeRoutineStore(path, [{ ...DECLARED, everySeconds: 1 }])).toThrow(/everySeconds/)
+    expect(() => writeRoutineStore(path, [{ ...DECLARED, cron: 'nope' }])).toThrow(/cron/)
     expect(readFileSync(path, 'utf8')).toBe(before)
   })
 })
@@ -104,7 +114,7 @@ describe('routine store saved entries', () => {
   const SCOUT = { kind: 'member', memberId: 'member:scout' as AgentTeamMemberId, handle: 'scout' } as const
   const SAVED_AT = '2026-09-25T09:00:00.000Z'
   const LATER = '2026-09-25T10:00:00.000Z'
-  const ROUTINE = { name: 'standup', member: 'scout', prompt: 'report your progress', everySeconds: 3600 } as const
+  const ROUTINE = { name: 'standup', member: 'scout', prompt: 'report your progress', cron: '0 * * * *' } as const
 
   it('records who saved a routine and when, and keeps that creation on a later save', () => {
     const first = saveStoredRoutine(path, ROUTINE, HUMAN, SAVED_AT)
@@ -123,7 +133,7 @@ describe('routine store saved entries', () => {
   it('keeps the entry where it was when a save replaces it', () => {
     saveStoredRoutine(path, ROUTINE, HUMAN, SAVED_AT)
     saveStoredRoutine(path, { ...ROUTINE, name: 'nightly-sweep' }, HUMAN, SAVED_AT)
-    saveStoredRoutine(path, { ...ROUTINE, everySeconds: 600 }, SCOUT, LATER)
+    saveStoredRoutine(path, { ...ROUTINE, cron: '*/10 * * * *' }, SCOUT, LATER)
     expect(readRoutineStore(path, warn).map(entry => entry.name)).toEqual(['standup', 'nightly-sweep'])
   })
 
@@ -146,7 +156,7 @@ describe('routine store saved entries', () => {
   it('refuses a declaration it cannot run and leaves every stored routine untouched', () => {
     saveStoredRoutine(path, ROUTINE, HUMAN, SAVED_AT)
     const before = readFileSync(path, 'utf8')
-    expect(() => saveStoredRoutine(path, { ...ROUTINE, everySeconds: 1 }, HUMAN, LATER)).toThrow(/everySeconds/)
+    expect(() => saveStoredRoutine(path, { ...ROUTINE, cron: '' }, HUMAN, LATER)).toThrow(/cron/)
     expect(readFileSync(path, 'utf8')).toBe(before)
   })
 
@@ -159,29 +169,30 @@ describe('routine store saved entries', () => {
   })
 
   it('treats a store an earlier version wrote as an unattributed routine that still runs', () => {
-    writeRoutineStore(path, [{ ...DECLARED, everySeconds: 600 }])
-    expect(readStoredRoutines(path)).toEqual([{ ...DECLARED, everySeconds: 600 }])
-    const saved = saveStoredRoutine(path, { ...DECLARED, everySeconds: 300 }, HUMAN, SAVED_AT)
+    writeRoutineStore(path, [{ ...DECLARED, cron: '*/10 * * * *' }])
+    expect(readStoredRoutines(path)).toEqual([{ ...DECLARED, cron: '*/10 * * * *' }])
+    const saved = saveStoredRoutine(path, { ...DECLARED, cron: '*/5 * * * *' }, HUMAN, SAVED_AT)
     // The entry that was already there recorded nobody, and this save does not
     // claim to have created it: it records itself as the change.
-    expect(saved.routine).toMatchObject({ everySeconds: 300, updatedBy: HUMAN, updatedAt: SAVED_AT })
+    expect(saved.routine).toMatchObject({ cron: '*/5 * * * *', updatedBy: HUMAN, updatedAt: SAVED_AT })
     expect(saved.routine.createdBy).toBeUndefined()
   })
 })
 
 describe('routine store merge', () => {  it('lets the store own a name it declares and keeps config-only routines', () => {
     const merged = mergeRoutines(
-      [{ ...DECLARED, everySeconds: 600 }],
-      [{ ...DECLARED, everySeconds: 3600 }, { ...DECLARED, name: 'nightly-sweep', everySeconds: 86400 }],
+      [{ ...DECLARED, cron: '*/10 * * * *' }],
+      [{ ...DECLARED, cron: '0 * * * *' }, { ...DECLARED, name: 'nightly-sweep', cron: '0 0 * * *' }],
     )
     expect(merged.map(routine => routine.name)).toEqual(['model-bump-check', 'nightly-sweep'])
-    // The store's interval wins: one name, one armed routine, not two.
-    expect(merged[0]?.everySeconds).toBe(600)
-    expect(merged[1]?.everySeconds).toBe(86400)
+    // The store's expression wins: one name, one armed routine, not two.
+    expect(merged[0]?.cron).toBe('*/10 * * * *')
+    expect(merged[1]?.cron).toBe('0 0 * * *')
   })
 
   it('reports a broken declaration as a broken declaration', () => {
-    expect(() => mergeRoutines([], [{ ...DECLARED, everySeconds: 60, at: '2026-09-25T09:00:00+09:00' }])).toThrow(/routines\[0\]/)
+    expect(() => mergeRoutines([], [{ ...DECLARED, cron: '0 9 * *' }])).toThrow(/routines\[0\]\.cron/)
+    expect(() => mergeRoutines([], [{ ...DECLARED, at: '2026-09-25T09:00:00+09:00' }])).toThrow(/routines\[0\]\.at is no longer supported/)
   })
 })
 
@@ -191,7 +202,7 @@ describe('routine store watch', () => {
     const dispose = watchRoutineStore(path, () => { calls += 1 }, warn)
     try {
       await settle()
-      writeRoutineStore(path, [{ ...DECLARED, everySeconds: 600 }])
+      writeRoutineStore(path, [{ ...DECLARED, cron: '*/10 * * * *' }])
       expect(await waitFor(() => calls > 0)).toBe(true)
       expect(warnings).toEqual([])
     } finally {
@@ -204,7 +215,7 @@ describe('routine store watch', () => {
     const dispose = watchRoutineStore(path, () => { calls += 1 }, warn)
     await settle()
     dispose()
-    writeRoutineStore(path, [{ ...DECLARED, everySeconds: 600 }])
+    writeRoutineStore(path, [{ ...DECLARED, cron: '*/10 * * * *' }])
     await sleep(300)
     expect(calls).toBe(0)
   })

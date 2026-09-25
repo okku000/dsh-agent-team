@@ -26,6 +26,13 @@
  * - The framing. A woken Member cannot infer from the instruction alone that
  *   this turn came from a schedule rather than from the Human or a peer, and
  *   that nobody is waiting for an answer.
+ * - The spent one-shot. `once: true` means "at the next occurrence, and then
+ *   never again", and a cron expression has no year field, so the producer — not
+ *   the expression — has to remember that the fire already happened. It reads
+ *   that answer back out of the fire log at every mount, which is also why a
+ *   `once` delivery is kept in the log even after the ordinary lines are
+ *   trimmed: the marker is the only thing standing between one fire and one
+ *   fire per restart.
  *
  * The schedule itself (`routine-schedule.ts`) is pure; this row owns the
  * timers, the log, and the calls into the Host.
@@ -88,6 +95,12 @@ export interface RoutineDeliveredRecord {
   readonly routine: string
   readonly member: string
   readonly outcome: 'delivered'
+  /**
+   * Whether the routine declared itself a one-shot. A delivered one-shot is the
+   * record that stops it firing again after a restart, so this line outlives the
+   * log's ordinary trim.
+   */
+  readonly once: boolean
   /** The lane the wake took: `followup` for an idle Member, `steer` for a busy one. */
   readonly mode: AgentTeamWakeMode
   readonly sessionId: string
@@ -107,7 +120,14 @@ export interface RoutineFailedRecord {
   readonly recordedAt: string
 }
 
-/** One routine that had no future occurrence to arm. */
+/**
+ * One routine that had no occurrence to arm.
+ *
+ * Validation refuses an expression that cannot fire, so this lane is a guard
+ * rather than an expected state: it is reached when the horizon the search
+ * looked through holds no occurrence, which a declaration that validated
+ * moments earlier can only mean after a clock so far off the calendar moved.
+ */
 export interface RoutineNotArmedRecord {
   readonly routine: string
   /** The Member the wake names. */
@@ -120,13 +140,25 @@ export interface RoutineNotArmedRecord {
 /** One fire-log line. */
 export type RoutineFireRecord = RoutineDeliveredRecord | RoutineFailedRecord | RoutineNotArmedRecord
 
+/** Whether one raw log line records a delivered one-shot, the marker a restart reads. */
+function isSpentOneShotLine(line: string): boolean {
+  try {
+    const record = JSON.parse(line) as Partial<RoutineDeliveredRecord>
+    return record.outcome === 'delivered' && record.once === true
+  } catch {
+    return false
+  }
+}
+
 /**
  * Append-only fire log with a size cap.
  *
  * The log is best-effort by construction: a routine whose record cannot be
  * written still fired, and losing the record must not become a second failure,
  * so an unwritable path warns and returns. Trimming keeps the newest lines,
- * because the interesting fire is the last one.
+ * because the interesting fire is the last one — and it keeps every delivered
+ * one-shot line besides, because that line is what stops a `once` routine from
+ * firing again at the next mount.
  * @param path - absolute log path.
  * @param warn - sink for the one warning an unwritable log produces.
  * @returns the recorder, which never throws.
@@ -137,13 +169,52 @@ export function createRoutineFireLog(path: string, warn: (message: string) => vo
       mkdirSync(dirname(path), { recursive: true })
       appendFileSync(path, `${JSON.stringify(record)}\n`)
       if (statSync(path).size > FIRE_LOG_MAX_BYTES) {
-        const kept = readFileSync(path, 'utf8').split('\n').filter(line => line.length > 0).slice(-FIRE_LOG_KEEP_LINES)
+        const lines = readFileSync(path, 'utf8').split('\n').filter(line => line.length > 0)
+        const kept = lines.filter((line, index) => isSpentOneShotLine(line) || index >= lines.length - FIRE_LOG_KEEP_LINES)
         writeFileSync(path, kept.length === 0 ? '' : `${kept.join('\n')}\n`)
       }
     } catch (error) {
       warn(`agent-team routines: fire log is unwritable (${error instanceof Error ? error.message : String(error)})`)
     }
   }
+}
+
+/**
+ * Every record in the fire log, oldest first.
+ *
+ * A line that cannot be read is skipped rather than fatal: the log is a
+ * convenience an operator may have edited, and the one thing the producer must
+ * never do is refuse to boot because a record is malformed.
+ * @param path - absolute log path.
+ * @returns the parsed records; empty when there is no log yet.
+ */
+export function readRoutineFireLog(path: string): readonly RoutineFireRecord[] {
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    return []
+  }
+  const records: RoutineFireRecord[] = []
+  for (const line of text.split('\n')) {
+    if (line.length === 0) continue
+    try {
+      const record = JSON.parse(line) as RoutineFireRecord
+      if (typeof record.routine === 'string' && typeof record.outcome === 'string') records.push(record)
+    } catch {
+      continue
+    }
+  }
+  return records
+}
+
+/** The names of the one-shot routines that already had their fire. */
+export function spentOneShotRoutines(records: readonly RoutineFireRecord[]): ReadonlySet<string> {
+  const spent = new Set<string>()
+  for (const record of records) {
+    if (record.outcome === 'delivered' && record.once === true) spent.add(record.routine)
+  }
+  return spent
 }
 
 /** How one routine's target reads on a log line. */
@@ -180,8 +251,10 @@ export interface RoutineSchedulerOptions {
  * The routine timers.
  *
  * One timer per routine, always armed for the routine's next occurrence. A
- * repeat re-arms from the instant it was due rather than from the moment it
- * settled, so a slow wake does not push the phase; a spent one-shot disarms.
+ * repeat re-arms from the moment its delivery settled, which a cron expression
+ * makes free: the phase belongs to the expression rather than to the arming, so
+ * a slow wake cannot drift it — and the occurrences the wake outlived are
+ * skipped instead of arriving as a catch-up burst. A spent one-shot disarms.
  * `fire` never rejects — a refusal is an event, not an exception the timer
  * could not handle.
  */
@@ -219,10 +292,6 @@ export class RoutineScheduler {
    * @param routine - the routine to deliver.
    */
   async fire(routine: Routine): Promise<void> {
-    // The instant this fire was armed for, not the instant it settled: a repeat
-    // re-arms from its due instant, so a delivery that takes minutes cannot push
-    // the phase of a routine that carries no explicit anchor.
-    const due = this.targets.get(routine.name)
     this.disarm(routine.name)
     const firedAt = Date.now()
     try {
@@ -237,7 +306,10 @@ export class RoutineScheduler {
         detail: error instanceof Error ? error.message : String(error),
       })
     }
-    if (isRepeatingRoutine(routine)) this.arm(routine, due ?? firedAt)
+    // From the settled instant: the expression owns the phase, so this lands on
+    // the same grid it would have without the delay, and a delivery that
+    // outlived several occurrences costs one fire rather than a burst.
+    if (isRepeatingRoutine(routine)) this.arm(routine)
   }
 
   private disarm(routineName: string): void {
@@ -283,9 +355,25 @@ export function apply(ctx: Context, config: Config): void {
   // Read before the effect: a declaration the Host cannot run has to fail the
   // row loudly at mount, exactly as it did before the store existed.
   const declared = mergeRoutines(readRoutineStore(storePath, warn), config?.routines)
-  const appendFire = createRoutineFireLog(routineFireLogPath(), warn)
+  const fireLogPath = routineFireLogPath()
+  const appendFire = createRoutineFireLog(fireLogPath, warn)
   const recordedAt = (): string => new Date().toISOString()
   let scheduler: RoutineScheduler | undefined
+
+  /**
+   * The routines this mount may arm: every one except a one-shot that already
+   * had its fire. The log is re-read here rather than cached, so a delete and a
+   * fresh save in the GUI is picked up by the same store watcher that re-arms
+   * everything else.
+   */
+  const armable = (routines: readonly Routine[]): readonly Routine[] => {
+    const spent = spentOneShotRoutines(readRoutineFireLog(fireLogPath))
+    return routines.filter(routine => {
+      if (!(routine.once && spent.has(routine.name))) return true
+      ctx.logger.info(`agent-team routines: '${routine.name}' already fired once; not armed`)
+      return false
+    })
+  }
 
   const buildScheduler = (routines: readonly Routine[]): RoutineScheduler => new RoutineScheduler({
     routines,
@@ -303,8 +391,9 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
       if (event.outcome === 'not-armed') {
-        // A one-shot whose instant passed while the Host was down. Boot must
-        // survive it, but silence would look like a routine that never fires.
+        // Reached only when the search horizon holds no occurrence at all, which
+        // validation already refuses. Boot must survive it, but silence would
+        // look like a routine that never fires.
         ctx.logger.warn(`agent-team routines: '${routine.name}' has no future occurrence; not armed`)
         appendFire({ routine: routine.name, ...routineTargetFields(routine), outcome: 'not-armed', detail: event.detail, recordedAt: recordedAt() })
         return
@@ -315,6 +404,7 @@ export function apply(ctx: Context, config: Config): void {
           routine: routine.name,
           member: event.result.memberHandle,
           outcome: 'delivered',
+          once: routine.once,
           mode: event.result.mode,
           sessionId: event.result.sessionId,
           firedAt: new Date(event.firedAt).toISOString(),
@@ -353,7 +443,9 @@ export function apply(ctx: Context, config: Config): void {
       ctx.logger.info('agent-team routines: no routines configured')
       return
     }
-    scheduler = buildScheduler(routines)
+    const due = armable(routines)
+    if (due.length === 0) return
+    scheduler = buildScheduler(due)
     scheduler.armAll()
   }
 
@@ -366,8 +458,11 @@ export function apply(ctx: Context, config: Config): void {
     if (declared.length === 0) {
       ctx.logger.info('agent-team routines: no routines configured')
     } else {
-      scheduler = buildScheduler(declared)
-      scheduler.armAll()
+      const due = armable(declared)
+      if (due.length > 0) {
+        scheduler = buildScheduler(due)
+        scheduler.armAll()
+      }
     }
     return () => {
       withdrawDeclarations()

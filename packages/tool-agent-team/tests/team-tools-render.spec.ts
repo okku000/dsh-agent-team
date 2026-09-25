@@ -508,20 +508,24 @@ describe('team_routine renders the schedule and the routine it changed', () => {
   it('list: one header count split by origin, one line per routine, and no write token', () => {
     const text = renderText(teamTools().get('team_routine')!, { action: 'list' }, {
       kind: 'listed',
+      zone: 'Asia/Tokyo',
       routines: [
-        { name: 'morning-catalog', origin: 'store', trigger: 'everySeconds', everySeconds: 3600,
+        { name: 'morning-catalog', origin: 'store', cron: '0 9 * * *',
           member: 'scout', prompt: 'Check the catalog', createdBy: SAVED_BY, createdAt: '2026-09-08T01:00:00.000Z' },
-        { name: 'evening-catalog', origin: 'store', trigger: 'everySeconds', everySeconds: 86400, once: true,
+        { name: 'evening-catalog', origin: 'store', cron: '0 18 * * fri', once: true,
           member: 'peer', prompt: 'Check the digest', createdBy: SAVED_BY, createdAt: '2026-09-08T02:00:00.000Z',
           updatedBy: { kind: 'member', memberId: 'member:peer', handle: 'peer' }, updatedAt: '2026-09-08T03:00:00.000Z' },
-        { name: 'operator-sweep', origin: 'config', trigger: 'at', at: '2026-09-09T01:00:00.000Z',
+        { name: 'operator-sweep', origin: 'config', cron: '30 1 * * *',
           member: 'builder', prompt: 'Sweep the catalog once' },
       ],
     })
     expect(text).toContain(`Routines — 3 scheduled (2 saved here, 1 declared on the operator's config).`)
-    expect(text).toContain('morning-catalog · every 3600s · wake @scout — Check the catalog · saved by @scheduler at 2026-09-08T09:00:00+08:00')
-    expect(text).toContain('evening-catalog · every 86400s, the first fire only · wake @peer — Check the digest · saved by @scheduler at 2026-09-08T10:00:00+08:00 · last changed by @peer')
-    expect(text).toContain("operator-sweep · once at 2026-09-09T09:00:00+08:00 · wake @builder — Sweep the catalog once · declared on the operator's own config — not editable here")
+    expect(text).toContain("morning-catalog · cron '0 9 * * *' · wake @scout — Check the catalog · saved by @scheduler at 2026-09-08T09:00:00+08:00")
+    expect(text).toContain("evening-catalog · cron '0 18 * * fri', the first fire only · wake @peer — Check the digest · saved by @scheduler at 2026-09-08T10:00:00+08:00 · last changed by @peer")
+    expect(text).toContain("operator-sweep · cron '30 1 * * *' · wake @builder — Sweep the catalog once · declared on the operator's own config — not editable here")
+    // The expression is reported verbatim, in the Host's zone rather than the
+    // model's: the listing names that zone once, above the lines.
+    expect(text).toContain("Every expression is read on the Host's own clock (Asia/Tokyo); it is not translated into your zone or the reader's.")
     expect(text).toContain("Saving replaces a routine of the same name")
     // A schedule is configuration, not a ledger fact: the only mention of a
     // revision is the footer saying neither mutation needs one, and no
@@ -538,13 +542,13 @@ describe('team_routine renders the schedule and the routine it changed', () => {
 
     const legacy = renderText(teamTools().get('team_routine')!, { action: 'list' }, {
       kind: 'listed',
-      routines: [{ name: 'old-timer', origin: 'store', trigger: 'at', at: '2026-09-09T01:00:00.000Z', member: 'scout', prompt: 'x' }],
+      routines: [{ name: 'old-timer', origin: 'store', cron: '0 9 * * *', member: 'scout', prompt: 'x' }],
     })
     expect(legacy).toContain("saved before routines recorded who saved them")
   })
 
   it('saved: created vs replaced, with the affected routine first and no restart requirement', () => {
-    const row = { name: 'morning-catalog', origin: 'store', trigger: 'everySeconds', everySeconds: 3600,
+    const row = { name: 'morning-catalog', origin: 'store', cron: '0 9 * * *',
       member: 'scout', prompt: 'Check the catalog', createdBy: SAVED_BY, createdAt: '2026-09-08T01:00:00.000Z' }
     const created = renderText(teamTools().get('team_routine')!, { action: 'save', name: 'morning-catalog' }, {
       kind: 'saved', name: 'morning-catalog', created: true, routine: row, routines: [row],
@@ -574,20 +578,26 @@ describe('team_routine renders the schedule and the routine it changed', () => {
     expect(missed).toContain("the operator declared in the profile's own config cannot be deleted here")
   })
 
-  it('the description states the one wake, the one-trigger rule, and that a fire commits nothing', () => {
+  it('the description states the one wake, the cron grammar, and that a fire commits nothing', () => {
     const description = teamTools().get('team_routine')!.description
     expect(description).toContain('it wakes one named Agent Member by injecting your instruction into that Member')
     expect(description).toContain('a routine commits nothing to the Team itself')
-    expect(description).toContain('Exactly one trigger')
+    expect(description).toContain('The trigger is one five-field cron expression')
+    expect(description).toContain("read on the Host's own clock")
+    expect(description).toContain('`once: true` fires at the next occurrence and then never again')
+    expect(description).toContain('`@daily`-style macros and six-field (seconds) forms are refused')
+    expect(description).toContain('is refused when you save it rather than left to fail silently')
     expect(description).toContain("The name is the routine's identity")
     expect(description).toContain('cannot be saved over or deleted from here')
     expect(description).toContain('Saving needs no restart')
     // The post lane is gone: neither the model-facing description nor the
-    // parameter set offers a second way to make a routine.
+    // parameter set offers a second way to make a routine, and the legacy
+    // trigger names are not offered back to the model that used them.
     expect(description).not.toContain('kind')
+    for (const legacy of ['everySeconds', 'anchorAt']) expect(description).not.toContain(legacy)
     const properties = (teamTools().get('team_routine')!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
-    for (const gone of ['kind', 'channelRef', 'mentions', 'body', 'asTask']) expect(properties).not.toHaveProperty(gone)
-    expect(Object.keys(properties).sort()).toEqual(['action', 'anchorAt', 'at', 'everySeconds', 'member', 'name', 'once', 'prompt', 'summary', 'workspace'])
+    for (const gone of ['kind', 'channelRef', 'mentions', 'body', 'asTask', 'trigger', 'everySeconds', 'at', 'anchorAt']) expect(properties).not.toHaveProperty(gone)
+    expect(Object.keys(properties).sort()).toEqual(['action', 'cron', 'member', 'name', 'once', 'prompt', 'summary', 'workspace'])
   })
 })
 

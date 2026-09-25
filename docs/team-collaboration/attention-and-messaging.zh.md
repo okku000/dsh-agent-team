@@ -25,13 +25,15 @@ Host 插件也可以在没有任何 Human、也没有 peer 发送者的情况下
 
 未能落地的唤醒会报告原因——`unknown-member`、`member-not-enabled`、`no-live-session`、`wake-failed`——无人值守的 producer 必须能区分配错的目标与尚未激活的 Member。
 
-Team 自己附带一个 producer，即 `wowyuarm-agent-team-routines` 行：`config.routines` 列出要触发什么，每条 entry 声明且只声明一个 trigger——至少 60 的 `everySeconds`（给了 `anchorAt` 就按其对齐），或一个带明确 offset 的 RFC 3339 `at` 时刻。
+Team 自己附带一个 producer，即 `wowyuarm-agent-team-routines` 行：`config.routines` 列出要触发什么，每条 entry 声明且只声明一个 trigger——一个五字段 cron 表达式，按 Host 自己的时钟读取。`once: true` 把任意表达式变成一次性触发：只在它的下一次出现时触发。
 
 每条 entry 只做一件事：用 handle 或带品牌的 id 指名一个 Member，并携带要注入该 Member 自己 Session 的指令。routine 只会唤醒别人——一次触发是该 Member 的 turn，本身既不是 Message，也不是 Team 事实。
 
-无法运行的声明会在该行挂载时报错，因为「静默地永不触发」正是无人值守的 producer 事后无法报告的失败；唯一例外是 Host 停机期间已错过的 one-shot，它记为 `not-armed`，而不是让启动失败。
+无法运行的声明会在该行挂载时报错，因为「静默地永不触发」正是无人值守的 producer 事后无法报告的失败；五年内一次都不会到的表达式会带名字被拒。已经触发过的 `once` routine 记在 producer 自己的 fire log 里，因此重启不会让它触发第二次——而 cron 表达式不带年份，Host 停机期间错过的那一次就只是改在下一个出现时刻触发。
 
-每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`——`delivered` 记通道与 Session id，`failed` 记 reason（`unknown-member`、`member-not-enabled`、`no-live-session`、`wake-failed`）与 message，错过的时刻记 `not-armed`——尽力而为：日志不可写时只 warn 而不抛出，超过 256 KiB 后只保留最新 200 行。指令以 `[ROUTINE FIRE] <name>` 为标题，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。
+每次触发都追加到 `$DSH_HOME/agent-team/routines/fires.jsonl`——`delivered` 记通道、Session id，以及这条 routine 是否为一次性，`failed` 记 reason（`unknown-member`、`member-not-enabled`、`no-live-session`、`wake-failed`）与 message，`not-armed` 记「没有未来的出现时刻」的声明——尽力而为：日志不可写时只 warn 而不抛出，超过 256 KiB 后只保留最新 200 行。
+
+一次性的 `delivered` 行是裁剪时唯一会保留的条目，因为正是它让那条 routine 变成已用尽：重启读回它就把该 routine 保持为未挂载，只有删除再重新保存才会重新挂载。指令以 `[ROUTINE FIRE] <name> — fired <instant> (cron '<expression>')` 为标题，带上 Team 固定的 UTC+8 时刻，并声明这个 turn 无人值守、该对话里没有人在等回复。
 
 这个 store 并不专属于 operator：Web Client 的 routines 面板与 `team_routine` 工具写的是同一个 store，所以 Human 在对话里交代的那件事，Member 可以直接排进去，不必等 operator 改 profile。每条落库 routine 记下谁在何时保存；而在 `config.routines` 里声明的 entry 报为在那里声明，任何工具都不能覆盖或删除它。
 

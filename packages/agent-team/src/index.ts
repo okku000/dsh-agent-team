@@ -41,6 +41,7 @@ import { AgentTeamWakeDeliveryError, deliverWake, resolveWakeMember, type AgentT
 import type { MemberSkillSelectionRef } from './member-skills.ts'
 import { classifyRecoverableError, RecoveryCoordinator, RECOVERY_MAX_CONSECUTIVE_ERRORS } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf } from './stored-session-reader.ts'
+import { cronTimeZone } from './cron-expression.ts'
 import { normalizeRoutines, type RoutineConfig } from './routine-schedule.ts'
 import { deleteStoredRoutine, readStoredRoutines, routineStorePath, saveStoredRoutine, type StoredRoutine } from './routine-store.ts'
 import { agentTeamDomainSpec } from './spec.ts'
@@ -1574,7 +1575,7 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('routines')
   routines(request: AgentTeamRoutinesRequest): AgentTeamRoutinesResult {
     this.requireWorkspace(request.workspaceId)
-    return Object.freeze({ routines: this.routineEntries() })
+    return Object.freeze({ routines: this.routineEntries(), zone: cronTimeZone() })
   }
 
   /**
@@ -1833,7 +1834,7 @@ export default class AgentTeam extends TypertRemoteService {
   routinesForAgent(agent: Agent, request: AgentTeamRoutinesRequest): AgentTeamRoutinesResult {
     const actor = this.memberActor(agent)
     this.requireAgentWorkspace(actor, request.workspaceId)
-    return Object.freeze({ routines: this.routineEntries() })
+    return Object.freeze({ routines: this.routineEntries(), zone: cronTimeZone() })
   }
 
   /**

@@ -36,11 +36,11 @@ history 页渲染历史结果与 Thread 身份，首页给 full anchor、continu
 
 ## `team_routine`
 
-`team_routine` 管的是 Host 自己的排程，而不是某个 Session 的：`list` 回答「没人在说话时还有什么会触发」，`save` 按 name 新建或覆盖一条 routine，`delete` 按 name 删除。一条 routine 只做一件事，且只声明一个 trigger——`everySeconds`（至少 60 的整数，给了 `anchorAt` 就按其对齐）或一个绝对的 RFC 3339 `at`。name 就是身份，所以 save 原地替换，两个 mutation 都不需要 revision token：这是配置，不是账本事实。
+`team_routine` 管的是 Host 自己的排程，而不是某个 Session 的：`list` 回答「没人在说话时还有什么会触发」，`save` 按 name 新建或覆盖一条 routine，`delete` 按 name 删除。一条 routine 只做一件事，且只声明一个 trigger——一个按 Host 自己时钟读取的五字段 cron 表达式（列表会报出读它用的时区），`once` 表示首次触发后停止。name 就是身份，所以 save 原地替换，两个 mutation 都不需要 revision token：这是配置，不是账本事实。
 
 每条 routine 只唤醒一个 Member，不做别的：它把 `prompt` 注入该 Member 自己的 Session，因此只有已激活且持有 live session 的 Member 才能被触发。routine 不能替任何人说话——它不向 Team 提交任何东西，触发出来的是该 Member 的 turn，而不是一条 Message。`summary` 是 notice 携带的一行说明。
 
-每条落库的 routine 都记下谁在何时保存，这份归属渲染在该 routine 自己的行上。operator 在 profile 自己的 `config.routines` 里声明的 entry 报为 origin `config`，工具既不能覆盖也不能删除。Host 无法运行的声明会带原因整体被拒，已在跑的 routine 保持原样；保存成功不需要重启，store 一变运行中的 Host 就重新挂载排程。
+每条落库的 routine 都记下谁在何时保存，这份归属渲染在该 routine 自己的行上。operator 在 profile 自己的 `config.routines` 里声明的 entry 报为 origin `config`，工具既不能覆盖也不能删除。Host 无法运行的声明会带原因整体被拒——旧 trigger 字段、不支持的宏、六字段形式、五年内一次都不会到的表达式——已在跑的 routine 保持原样；保存成功不需要重启，store 一变运行中的 Host 就重新挂载排程。
 
 ## `context_rollover`
 

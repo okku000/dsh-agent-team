@@ -620,10 +620,7 @@ interface RoutineAuthorView {
 interface RoutineRow {
   readonly name: string
   readonly origin: string
-  readonly trigger: string
-  readonly everySeconds?: number
-  readonly at?: string
-  readonly anchorAt?: string
+  readonly cron: string
   readonly once?: boolean
   readonly member?: string
   readonly prompt?: string
@@ -640,10 +637,7 @@ function routineRow(routine: AgentTeamRoutine): RoutineRow {
   return {
     name: routine.name,
     origin: routine.origin,
-    trigger: declaration.everySeconds === undefined ? 'at' : 'everySeconds',
-    ...(declaration.everySeconds === undefined ? {} : { everySeconds: declaration.everySeconds }),
-    ...(declaration.at === undefined ? {} : { at: declaration.at }),
-    ...(declaration.anchorAt === undefined ? {} : { anchorAt: declaration.anchorAt }),
+    cron: declaration.cron,
     ...(declaration.once === undefined ? {} : { once: declaration.once }),
     ...(declaration.member === undefined ? {} : { member: declaration.member }),
     ...(declaration.prompt === undefined ? {} : { prompt: declaration.prompt }),
@@ -658,9 +652,7 @@ function routineRow(routine: AgentTeamRoutine): RoutineRow {
 /** One routine line: whom it wakes, when it fires, and who put it there. */
 function routineLine(row: RoutineRow): string {
   const target = `wake @${row.member} — ${boundedSubject(row.prompt ?? '')}`
-  const trigger = row.everySeconds === undefined
-    ? `once${row.at === undefined ? '' : ` at ${formatTeamTimestamp(row.at)}`}`
-    : `every ${row.everySeconds}s${row.once === true ? ', the first fire only' : ''}`
+  const trigger = `cron '${row.cron}'${row.once === true ? ', the first fire only' : ''}`
   const savedBy = row.origin === 'config'
     ? "declared on the operator's own config — not editable here"
     : row.createdBy === undefined
@@ -680,10 +672,7 @@ const ROUTINE_AUTHOR_SCHEMA = {
 const ROUTINE_ROW_SCHEMA = {
   name: { type: 'string', required: true },
   origin: { type: 'string', required: true },
-  trigger: { type: 'string', required: true },
-  everySeconds: { type: 'number' },
-  at: { type: 'string' },
-  anchorAt: { type: 'string' },
+  cron: { type: 'string', required: true },
   once: { type: 'boolean' },
   member: { type: 'string' },
   prompt: { type: 'string' },
@@ -704,14 +693,12 @@ function rejectExtraArguments(args: Record<string, unknown>, allowed: readonly s
 
 const teamRoutine = defineTool({
   name: 'team_routine',
-  description: 'List, save, or delete a Team routine: work this Host starts on its own later, when nobody is talking any more. A routine does exactly one thing — it wakes one named Agent Member by injecting your instruction into that Member\'s own session, which is the answer to "every morning, go check the catalog". The Member then acts with its own identity and judgement; a routine commits nothing to the Team itself. Exactly one trigger: everySeconds (an integer of at least 60, aligned to anchorAt when given) or one absolute RFC 3339 at instant; once stops a repeating routine after its first delivery. The name is the routine\'s identity: save upserts it and delete removes it, and neither needs a revision token. The schedule belongs to the Host rather than to your Session: it survives restarts, it fires unattended, and it is listed with who saved it and when. A routine the operator declared in the profile\'s own config is listed as origin \'config\' and cannot be saved over or deleted from here — ask the Human to patch that row. Saving needs no restart: the running Host arms the change as soon as the store changes. A declaration the Host cannot run is refused whole with the reason, and the routines that already run stay as they were.',
+  description: 'List, save, or delete a Team routine: work this Host starts on its own later, when nobody is talking any more. A routine does exactly one thing — it wakes one named Agent Member by injecting your instruction into that Member\'s own session, which is the answer to "every Monday morning, go check the catalog". The Member then acts with its own identity and judgement; a routine commits nothing to the Team itself. The trigger is one five-field cron expression, "minute hour day-of-month month day-of-week", read on the Host\'s own clock — the listing reports that zone, and a saved expression is not translated into yours. `0 9 * * 1` is every Monday at 09:00, `*/15 9-17 * * mon-fri` is every quarter hour of the working day. Each field accepts `*`, a number, a range (`9-17`), a step (`*/15`, `5-10/2`, `30/10`), a comma list, and three-letter month or weekday names (`jan`, `mon-fri`); day-of-week runs 0-7 with 7 as Sunday, and the day rule is Vixie\'s: when both day-of-month and day-of-week are restricted, the day matches on either. `@daily`-style macros and six-field (seconds) forms are refused. `once: true` fires at the next occurrence and then never again — a cron expression has no year, so there is no other way to say "just this one". An expression that can never fire, such as `0 0 30 2 *`, is refused when you save it rather than left to fail silently. The name is the routine\'s identity: save upserts it and delete removes it, and neither needs a revision token. The schedule belongs to the Host rather than to your Session: it survives restarts, it fires unattended, and it is listed with who saved it and when. A routine the operator declared in the profile\'s own config is listed as origin \'config\' and cannot be saved over or deleted from here — ask the Human to patch that row. Saving needs no restart: the running Host arms the change as soon as the store changes. A declaration the Host cannot run is refused whole with the reason, and the routines that already run stay as they were.',
   parameters: {
     action: { type: 'string', required: true, enum: ['list', 'save', 'delete'] },
     name: { type: 'string', description: "The routine's name and identity: what save upserts and delete removes. Letters, digits, '-' and '_'." },
-    everySeconds: { type: 'number', description: 'Repeating trigger: an integer of at least 60, aligned to anchorAt when given and to the first arming otherwise.' },
-    at: { type: 'string', description: "One-shot trigger: an absolute RFC 3339 instant with an explicit offset or 'Z'." },
-    anchorAt: { type: 'string', description: 'Optional phase anchor for everySeconds, as an absolute RFC 3339 instant.' },
-    once: { type: 'boolean', description: 'Stops a repeating routine after its first delivery.' },
+    cron: { type: 'string', description: 'The trigger: five fields, "minute hour day-of-month month day-of-week", read on the Host\'s own clock. For example "0 9 * * 1" (Mondays at 09:00) or "*/15 * * * *" (every quarter hour). Required by save.' },
+    once: { type: 'boolean', description: 'Fire at the next occurrence and then never again; omit to repeat on every occurrence.' },
     member: { type: 'string', description: "Wake target: a Member handle (a leading '@' is optional) or a branded 'member:<uuid>' id. Only an activated Member with a live session can be woken." },
     prompt: { type: 'string', description: "The instruction injected into that Member's session on every fire." },
     summary: { type: 'string', description: 'One-line account shown on the wake notice; defaults to the routine name.' },
@@ -720,6 +707,7 @@ const teamRoutine = defineTool({
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
       kind: { type: 'string', required: true }, name: { type: 'string' }, created: { type: 'boolean' }, removed: { type: 'boolean' },
+      zone: { type: 'string' },
       routine: { type: 'object', additionalProperties: false, properties: ROUTINE_ROW_SCHEMA },
       routines: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: ROUTINE_ROW_SCHEMA } },
     } },
@@ -744,6 +732,7 @@ const teamRoutine = defineTool({
       const lines = [`Routines — ${value.routines.length} scheduled (${saved} saved here, ${value.routines.length - saved} declared on the operator's config).`]
       if (value.routines.length === 0) lines.push('Nothing is scheduled on this Host.')
       else lines.push(...value.routines.map(routine => routineLine(routine)))
+      lines.push(`Every expression is read on the Host's own clock${value.zone === undefined ? '' : ` (${value.zone})`}; it is not translated into your zone or the reader's.`)
       lines.push('Saving replaces a routine of the same name; deleting removes it. Neither needs a revision token, and neither touches a routine declared on the operator\'s own config.')
       return [{ type: 'text', text: lines.join('\n') }]
     },
@@ -755,33 +744,31 @@ const teamRoutine = defineTool({
     const workspaceId = workspaceOf(args, agent)
     if (args.action === 'list') {
       rejectExtraArguments(args, ['action', 'workspace'], 'list')
-      return { kind: 'listed', routines: host.routinesForAgent(agent, { workspaceId }).routines.map(routineRow) }
+      const listing = host.routinesForAgent(agent, { workspaceId })
+      return { kind: 'listed', zone: listing.zone, routines: listing.routines.map(routineRow) }
     }
     if (args.action === 'delete') {
       rejectExtraArguments(args, ['action', 'workspace', 'name'], 'delete')
       if (args.name === undefined || args.name.trim() === '') throw new Error('delete requires the routine name')
       const result = host.deleteRoutineForAgent(agent, { workspaceId, name: args.name })
-      return { kind: 'deleted', name: result.name, removed: result.removed, routines: host.routinesForAgent(agent, { workspaceId }).routines.map(routineRow) }
+      const listing = host.routinesForAgent(agent, { workspaceId })
+      return { kind: 'deleted', name: result.name, removed: result.removed, zone: listing.zone, routines: listing.routines.map(routineRow) }
     }
     if (args.action !== 'save') throw new Error(`unknown action '${String(args.action)}'`)
-    rejectExtraArguments(args, ['action', 'workspace', 'name', 'everySeconds', 'at', 'anchorAt', 'once',
+    rejectExtraArguments(args, ['action', 'workspace', 'name', 'cron', 'once',
       'member', 'prompt', 'summary'], 'save')
     if (args.name === undefined || args.name.trim() === '') throw new Error('save requires the routine name')
-    if ((args.everySeconds === undefined) === (args.at === undefined)) {
-      throw new Error("save requires exactly one trigger: everySeconds (an integer of at least 60) or at (an absolute RFC 3339 instant)")
-    }
-    const trigger = {
-      ...(args.everySeconds === undefined ? {} : { everySeconds: args.everySeconds }),
-      ...(args.at === undefined ? {} : { at: args.at }),
-      ...(args.anchorAt === undefined ? {} : { anchorAt: args.anchorAt }),
-      ...(args.once === undefined ? {} : { once: args.once }),
+    if (args.cron === undefined || args.cron.trim() === '') {
+      throw new Error("save requires cron: five fields, 'minute hour day-of-month month day-of-week', read on the Host's own clock (e.g. '0 9 * * 1')")
     }
     const declaration: RoutineConfig = {
-      name: args.name, member: args.member ?? '', prompt: args.prompt ?? '',
-      ...(args.summary === undefined ? {} : { summary: args.summary }), ...trigger,
+      name: args.name, member: args.member ?? '', prompt: args.prompt ?? '', cron: args.cron.trim(),
+      ...(args.summary === undefined ? {} : { summary: args.summary }),
+      ...(args.once === undefined ? {} : { once: args.once }),
     }
     const saved = host.saveRoutineForAgent(agent, { workspaceId, routine: declaration })
-    return { kind: 'saved', routine: routineRow(saved.routine), created: saved.created, routines: host.routinesForAgent(agent, { workspaceId }).routines.map(routineRow) }
+    const listing = host.routinesForAgent(agent, { workspaceId })
+    return { kind: 'saved', routine: routineRow(saved.routine), created: saved.created, zone: listing.zone, routines: listing.routines.map(routineRow) }
   },
 })
 
