@@ -279,13 +279,13 @@ function RoutineEditor({ routine, zone, members, onClose, save, t }: {
     title={routine === undefined ? t('routinesCreateTitle') : t('routinesEditTitle')}
     description={routine === undefined ? t('routinesCreateNotice') : routine.name}
     closeLabel={t('close')}
-    contentClassName={createCss.dialogContent!}
+    contentClassName={routinesCss.dialogContent!}
     footer={<>
       <Button variant="outline" disabled={saving} onClick={onClose}>{t('cancel')}</Button>
       <Button type="submit" form="team-routine-form" variant="primary" disabled={saving}>{saving ? t('routinesSaving') : t('routinesSave')}</Button>
     </>}
   >
-    <form id="team-routine-form" className={createCss.form} onSubmit={event => { void submit(event) }}>
+    <form id="team-routine-form" className={`${createCss.form} ${routinesCss.form}`} onSubmit={event => { void submit(event) }}>
       <label className={createCss.field}>
         <span>{t('routinesName')}</span>
         <Input className={createCss.input!} value={name} placeholder={t('routinesNamePlaceholder')} disabled={saving || routine !== undefined} autoFocus={routine === undefined} onChange={event => { setName(event.target.value) }} />

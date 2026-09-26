@@ -182,3 +182,30 @@
 .select:disabled {
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* The routine editor is the tallest dialog this bundle opens: five labelled
+   fields plus the cron hint, the zone line, and the three-fire preview — eleven
+   grid children. The shared `.dialogContent` cap (`min(70vh, 560px)`) is sized
+   for the shorter create dialogs and hid 189px of it at a 960px-high viewport,
+   so the `once` checkbox and the tail of the preview fell below the fold with
+   nothing to signal them. The routine form therefore carries its own, taller
+   cap. */
+.dialogContent {
+  max-height: min(760px, calc(100vh - 240px));
+  overflow-y: auto;
+}
+
+/* The taller cap alone still leaves the form over, because its ten gaps are the
+   shared 16px step the two-field Channel/Agent forms set. The routine fields are
+   labelled and bordered, so they carry their own separation; the tighter step
+   returns 40px. `routines.module.css` is imported after `create.module.css`, so
+   this gap wins while `display` still comes from the shared seat. */
+.form {
+  gap: 12px;
+}
+
+@media (max-width: 600px) {
+  .dialogContent {
+    max-height: calc(100vh - 180px);
+  }
+}
